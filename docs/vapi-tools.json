@@ -9,6 +9,20 @@
     }
   },
   {
+    "name": "list_shop_openings",
+    "description": "Check all active barbers and their booked appointments to find general shop openings on a requested local date. Use immediately when a caller asks whether anyone has openings today or on another day without first naming a service or barber. Omit date to check today.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "Optional local appointment date in YYYY-MM-DD format. Omit to check today."
+        }
+      },
+      "required": []
+    }
+  },
+  {
     "name": "list_barbers",
     "description": "List only active barbers who offer the selected service. Use a serviceId returned by list_services.",
     "parameters": {

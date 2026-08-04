@@ -71,6 +71,11 @@ export async function runVoiceTool(
       case "list_services":
         result = listServices();
         break;
+      case "list_shop_openings":
+        result = await listShopOpenings(
+          optionalStringArg(args, "date") || currentLocalDateTime().date,
+        );
+        break;
       case "list_barbers":
         result = await listBarbers(stringArg(args, "serviceId"));
         break;
@@ -164,6 +169,34 @@ function listServices() {
       price,
       description,
     })),
+  };
+}
+
+async function listShopOpenings(date: string) {
+  validateBookableDate(date);
+  const staff = await getStaffCollection();
+  const barbers = await staff
+    .find({ role: "barber", active: true })
+    .sort({ name: 1 })
+    .toArray();
+
+  const availability = await Promise.all(
+    barbers.map(async (barber) => {
+      const slots = await availableSlots(barber._id, barber.name, date);
+      return {
+        barberId: barber._id.toString(),
+        barber: barber.name,
+        slots: slots.map((value) => ({ value, spoken: displayTime(value) })),
+      };
+    }),
+  );
+  const openings = availability.filter((barber) => barber.slots.length > 0);
+
+  return {
+    date,
+    timeZone: TIME_ZONE,
+    hasOpenings: openings.length > 0,
+    openings,
   };
 }
 

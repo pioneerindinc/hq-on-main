@@ -7,9 +7,10 @@ POST {APP_BASE_URL}/api/voice/vapi
 Authorization: Bearer {VAPI_WEBHOOK_SECRET}
 ```
 
-It supports `list_services`, `list_barbers`, `list_available_slots`, and
-`book_appointment`. The tools read the same `staff`, `availability`, and
-`appointments` MongoDB collections used by the web booking flow.
+It supports `list_services`, `list_shop_openings`, `list_barbers`,
+`list_available_slots`, and `book_appointment`. The tools read the same
+`staff`, `availability`, and `appointments` MongoDB collections used by the web
+booking flow.
 
 ## 1. Configure the application
 
@@ -35,9 +36,17 @@ Create an assistant in Vapi and give it a prompt similar to:
 You are the phone receptionist for Headquarters on Main, a barbershop.
 Help callers book appointments accurately and conversationally.
 
-Always use list_services for current services and pricing. Never invent a
-service, price, barber, date, or time. Use list_barbers after the caller chooses
-a service. Use list_available_slots immediately before offering times.
+Never invent a service, price, barber, date, or time. Use list_services for
+current services and pricing. When a caller asks whether anyone has openings
+today or on another date without naming a service or barber, immediately use
+list_shop_openings. Do not make them choose a service first. Briefly summarize
+the available barbers and times instead of reading an unnecessarily long list.
+
+Before booking a general opening, ask which service the caller wants, use
+list_services and list_barbers to verify that the selected barber offers it,
+and use list_available_slots immediately before offering or confirming the
+time. General shop openings are informational and do not replace this final
+service-specific availability check.
 
 Before calling book_appointment, read back and receive explicit confirmation
 of the service, barber, date, time, customer's full name, and callback phone
@@ -53,7 +62,7 @@ If a tool fails, apologize and offer to have the shop follow up; never pretend
 the booking succeeded.
 ```
 
-Create four synchronous custom tools using the definitions in
+Create five synchronous custom tools using the definitions in
 `docs/vapi-tools.json`. For every tool:
 
 1. Set the server URL to `{APP_BASE_URL}/api/voice/vapi`.
@@ -61,7 +70,16 @@ Create four synchronous custom tools using the definitions in
    `Authorization: Bearer {VAPI_WEBHOOK_SECRET}`.
 3. Attach that credential to the tool server.
 4. Leave the tool synchronous so the assistant waits for the scheduling result.
-5. Attach all four tools to the assistant.
+5. Attach all five tools to the assistant.
+
+For `list_shop_openings`, add this tool message in Vapi so the caller hears an
+immediate acknowledgment while the schedules are checked:
+
+```text
+Type: request-start
+Content: Let me check and see if anyone has any openings.
+Blocking: disabled
+```
 
 Also set the assistant-level server URL to the same endpoint with the same
 credential. Enable at least `status-update` and `end-of-call-report` server
@@ -99,15 +117,17 @@ sends transactional SMS through Twilio's Messaging API.
 Use Vapi's tool test or a local tunnel and confirm:
 
 1. `list_services` returns the live catalog.
-2. `list_barbers` excludes inactive barbers and those who do not offer the
+2. `list_shop_openings` returns remaining times across every active barber and
+   defaults to the shop's current local date when no date is supplied.
+3. `list_barbers` excludes inactive barbers and those who do not offer the
    selected service.
-3. `list_available_slots` matches the web booking calendar and excludes booked
+4. `list_available_slots` matches the web booking calendar and excludes booked
    times.
-4. `book_appointment` creates one confirmed `appointments` record with
+5. `book_appointment` creates one confirmed `appointments` record with
    `source: "voice"`.
-5. Replaying the same Vapi tool-call ID returns the original booking instead of
+6. Replaying the same Vapi tool-call ID returns the original booking instead of
    creating a duplicate.
-6. An end-of-call event upserts a record in `voiceCalls`.
+7. An end-of-call event upserts a record in `voiceCalls`.
 
 You can smoke-test the endpoint before configuring Vapi:
 
