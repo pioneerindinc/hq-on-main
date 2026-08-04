@@ -15,6 +15,26 @@ type Confirmation = {
 
 const steps = ["Service", "Barber", "Day & time", "Your info", "Confirmation"];
 
+function SmsConsent({
+  checked,
+  onChange,
+  className = "",
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  className?: string;
+}) {
+  return (
+    <div className={`sms-consent ${className}`.trim()}>
+      <label className="account-check">
+        <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+        <span>Text me appointment confirmation and reminder messages from HQ on Main (up to 2 messages per appointment). Message and data rates may apply. Reply STOP to unsubscribe or HELP for help.</span>
+      </label>
+      <p>Consent is optional and is not required to book. See our <Link href="/terms">Terms of Service</Link> and <Link href="/privacy">Privacy Policy</Link>.</p>
+    </div>
+  );
+}
+
 function localDateValue(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -325,10 +345,7 @@ export function BookingFlow() {
                   <div className="customer-signed-in">
                     <span>{customer.name.slice(0, 1)}</span>
                     <div><small>Booking as</small><h3>{customer.name}</h3><p>{customer.email} · {customer.phone}</p></div>
-                    <label className="account-check">
-                      <input type="checkbox" checked={smsConsent} onChange={(event) => setSmsConsent(event.target.checked)} />
-                      <span>Text me a confirmation and appointment reminder. Message and data rates may apply. Reply STOP to opt out.</span>
-                    </label>
+                    <SmsConsent checked={smsConsent} onChange={setSmsConsent} />
                     <button className="button button-primary" disabled={loading} onClick={() => completeBooking()} type="button">
                       {loading ? "Confirming…" : "Confirm appointment"}
                     </button>
@@ -348,10 +365,7 @@ export function BookingFlow() {
                           <input type="checkbox" checked={createAccount} onChange={(event) => setCreateAccount(event.target.checked)} />
                           <span>Save my information for faster booking next time</span>
                         </label>
-                        <label className="account-check wide">
-                          <input type="checkbox" checked={smsConsent} onChange={(event) => setSmsConsent(event.target.checked)} />
-                          <span>Text me a confirmation and appointment reminder. Message and data rates may apply. Reply STOP to opt out.</span>
-                        </label>
+                        <SmsConsent checked={smsConsent} onChange={setSmsConsent} className="wide" />
                         {createAccount && <label className="wide">Create a password<input name="password" type="password" minLength={10} required autoComplete="new-password" /><small>At least 10 characters</small></label>}
                         <button className="button button-primary wide" disabled={loading} type="submit">{loading ? "Confirming…" : "Confirm appointment"}</button>
                       </form>
@@ -359,10 +373,7 @@ export function BookingFlow() {
                       <form className="booking-info-form" onSubmit={handleLogin}>
                         <label className="wide">Email address<input name="email" type="email" required autoComplete="email" /></label>
                         <label className="wide">Password<input name="password" type="password" required autoComplete="current-password" /></label>
-                        <label className="account-check wide">
-                          <input type="checkbox" checked={smsConsent} onChange={(event) => setSmsConsent(event.target.checked)} />
-                          <span>Text me a confirmation and appointment reminder. Message and data rates may apply. Reply STOP to opt out.</span>
-                        </label>
+                        <SmsConsent checked={smsConsent} onChange={setSmsConsent} className="wide" />
                         <button className="button button-primary wide" disabled={loading} type="submit">{loading ? "Logging in…" : "Log in & confirm"}</button>
                       </form>
                     )}

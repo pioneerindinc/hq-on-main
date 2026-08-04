@@ -182,7 +182,7 @@ export default async function AdminDashboard({
                   <label className="portal-wide">Notes<input name="notes" placeholder="Optional appointment notes" /></label>
                   <label className="account-check portal-wide">
                     <input name="smsConsent" type="checkbox" />
-                    <span>The customer agreed to receive a confirmation and reminder by text.</span>
+                    <span>After hearing the HQ on Main SMS disclosure, the customer explicitly agreed to receive up to 2 appointment texts.</span>
                   </label>
                   <button className="button button-primary portal-wide" type="submit">Create appointment</button>
                 </form>

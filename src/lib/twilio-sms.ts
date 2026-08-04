@@ -26,7 +26,7 @@ export async function sendAppointmentConfirmation(appointment: SmsAppointment) {
   const message =
     `HQ on Main: ${text(appointment.name)}, your ${text(appointment.service)} with ` +
     `${text(appointment.barber)} is confirmed for ${readableDate(text(appointment.requestedDate))} ` +
-    `at ${displayTime(text(appointment.requestedTime))}. Reply STOP to unsubscribe.`;
+    `at ${displayTime(text(appointment.requestedTime))}. Reply STOP to unsubscribe or HELP for help.`;
 
   return sendAppointmentMessage(appointment, "confirmation", message);
 }
@@ -37,7 +37,7 @@ export async function sendAppointmentReminder(appointment: SmsAppointment) {
   const message =
     `Reminder from HQ on Main: your ${text(appointment.service)} with ` +
     `${text(appointment.barber)} is ${readableDate(text(appointment.requestedDate))} at ` +
-    `${displayTime(text(appointment.requestedTime))}. Reply STOP to unsubscribe.`;
+    `${displayTime(text(appointment.requestedTime))}. Reply STOP to unsubscribe or HELP for help.`;
 
   return sendAppointmentMessage(appointment, "reminder", message);
 }
