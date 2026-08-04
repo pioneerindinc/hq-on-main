@@ -1,0 +1,101 @@
+[
+  {
+    "name": "list_services",
+    "description": "List the current services, prices, descriptions, and stable service IDs offered by Headquarters on Main. Call this before discussing available services or booking.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "list_barbers",
+    "description": "List only active barbers who offer the selected service. Use a serviceId returned by list_services.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
+          "type": "string",
+          "description": "The stable service ID returned by list_services."
+        }
+      },
+      "required": ["serviceId"]
+    }
+  },
+  {
+    "name": "list_available_slots",
+    "description": "Return currently open 30-minute appointment start times for an eligible barber on a specific local calendar date. Call this immediately before offering times and again if the caller changes the barber, service, or date.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
+          "type": "string",
+          "description": "The stable service ID returned by list_services."
+        },
+        "barberId": {
+          "type": "string",
+          "description": "The barber ID returned by list_barbers."
+        },
+        "date": {
+          "type": "string",
+          "description": "Local appointment date in YYYY-MM-DD format."
+        }
+      },
+      "required": ["serviceId", "barberId", "date"]
+    }
+  },
+  {
+    "name": "book_appointment",
+    "description": "Create a confirmed appointment after the caller explicitly confirms the service, barber, local date, time, name, and callback number. Use only IDs and a time returned by the earlier tools.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "serviceId": {
+          "type": "string",
+          "description": "The stable service ID returned by list_services."
+        },
+        "barberId": {
+          "type": "string",
+          "description": "The barber ID returned by list_barbers."
+        },
+        "date": {
+          "type": "string",
+          "description": "Local appointment date in YYYY-MM-DD format."
+        },
+        "time": {
+          "type": "string",
+          "description": "24-hour HH:MM time returned by list_available_slots."
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Customer's confirmed full name."
+        },
+        "phone": {
+          "type": "string",
+          "description": "Customer's confirmed callback phone number, preferably E.164."
+        },
+        "email": {
+          "type": "string",
+          "description": "Optional customer email address."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional concise appointment notes requested by the customer."
+        },
+        "smsConsent": {
+          "type": "boolean",
+          "description": "True only when the caller explicitly agrees to receive this appointment's confirmation and reminder text messages; otherwise false."
+        }
+      },
+      "required": [
+        "serviceId",
+        "barberId",
+        "date",
+        "time",
+        "customerName",
+        "phone",
+        "smsConsent"
+      ]
+    }
+  }
+]
