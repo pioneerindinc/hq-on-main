@@ -72,9 +72,10 @@ export async function runVoiceTool(
         result = listServices();
         break;
       case "list_shop_openings":
-        result = await listShopOpenings(
-          optionalStringArg(args, "date") || currentLocalDateTime().date,
-        );
+        result = await listShopOpenings({
+          date: optionalStringArg(args, "date") || currentLocalDateTime().date,
+          barberName: optionalStringArg(args, "barberName"),
+        });
         break;
       case "list_barbers":
         result = await listBarbers(stringArg(args, "serviceId"));
@@ -172,17 +173,32 @@ function listServices() {
   };
 }
 
-async function listShopOpenings(date: string) {
-  validateBookableDate(date);
+async function listShopOpenings(input: { date: string; barberName?: string }) {
+  validateBookableDate(input.date);
   const staff = await getStaffCollection();
-  const barbers = await staff
+  const activeBarbers = await staff
     .find({ role: "barber", active: true })
     .sort({ name: 1 })
     .toArray();
+  const requestedName = input.barberName?.trim().toLocaleLowerCase() ?? "";
+  const barbers = requestedName
+    ? activeBarbers.filter((barber) => {
+        const name = stringValue(barber.name).toLocaleLowerCase();
+        const firstName = name.split(/\s+/)[0];
+        return name === requestedName || firstName === requestedName || name.includes(requestedName);
+      })
+    : activeBarbers;
+
+  if (requestedName && barbers.length === 0) {
+    const names = activeBarbers.map((barber) => stringValue(barber.name)).filter(Boolean);
+    throw new VoiceToolError(
+      `No active barber matched ${input.barberName}. The active barbers are: ${names.join(", ") || "none"}.`,
+    );
+  }
 
   const availability = await Promise.all(
     barbers.map(async (barber) => {
-      const slots = await availableSlots(barber._id, barber.name, date);
+      const slots = await availableSlots(barber._id, barber.name, input.date);
       return {
         barberId: barber._id.toString(),
         barber: barber.name,
@@ -193,8 +209,9 @@ async function listShopOpenings(date: string) {
   const openings = availability.filter((barber) => barber.slots.length > 0);
 
   return {
-    date,
+    date: input.date,
     timeZone: TIME_ZONE,
+    requestedBarber: input.barberName || null,
     hasOpenings: openings.length > 0,
     openings,
   };
