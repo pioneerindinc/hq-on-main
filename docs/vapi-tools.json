@@ -10,7 +10,7 @@
   },
   {
     "name": "list_shop_openings",
-    "description": "Check booked appointments and working hours to find openings on a requested local date, either across all active barbers or for a caller's preferred barber. Use before requiring a service when a caller wants to schedule and is choosing a barber, day, or time. Pass today or tomorrow exactly when the caller uses a relative date so the server resolves it in the shop's timezone. The response's dateSpoken and relativeToShopToday fields are authoritative; never calculate a weekday or relative-day name yourself. If there are no openings, follow dateGuidance and check nextCalendarDate before offering it. Omit date to check today and omit barberName when anyone is acceptable.",
+    "description": "Check booked appointments and working hours to find openings on a requested local date, either across all active barbers or for a caller's preferred barber. Use before requiring a service when a caller wants to schedule and is choosing a barber, day, or time. Pass today or tomorrow exactly when the caller uses a relative date so the server resolves it in the shop's timezone; never convert a caller's relative date to a year yourself. The response's dateSpoken and relativeToShopToday fields are authoritative; never calculate a weekday or relative-day name yourself. A date interpretation error is not an availability result: retry using the caller's original relative word. If there are no openings, follow dateGuidance and check nextCalendarDate before offering it. Omit date to check today and omit barberName when anyone is acceptable.",
     "parameters": {
       "type": "object",
       "properties": {

@@ -435,7 +435,7 @@ function validateBookableDate(date: string) {
   const today = currentLocalDateTime().date;
   if (date < today) {
     throw new VoiceToolError(
-      `Appointments cannot be booked in the past. Today at the shop is ${today}. For relative dates, call list_shop_openings with today or tomorrow instead of guessing the year.`,
+      `DATE INTERPRETATION ERROR, not an availability result: ${spokenDate(date)} is in the past. Today at the shop is ${spokenDate(today)} (${today}). Do not tell the caller this date has no openings. If the caller said today, tomorrow, or day after tomorrow, retry list_shop_openings with that exact phrase instead of supplying or guessing a year.`,
     );
   }
 }
