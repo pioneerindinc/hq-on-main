@@ -175,6 +175,8 @@ function listServices() {
 
 async function listShopOpenings(input: { date: string; barberName?: string }) {
   validateBookableDate(input.date);
+  const shopToday = currentLocalDateTime().date;
+  const nextCalendarDate = addCalendarDays(input.date, 1);
   const staff = await getStaffCollection();
   const activeBarbers = await staff
     .find({ role: "barber", active: true })
@@ -210,10 +212,20 @@ async function listShopOpenings(input: { date: string; barberName?: string }) {
 
   return {
     date: input.date,
+    dateSpoken: spokenDate(input.date),
+    relativeToShopToday: relativeToShopToday(input.date, shopToday),
+    shopToday,
+    shopTodaySpoken: spokenDate(shopToday),
     timeZone: TIME_ZONE,
     requestedBarber: input.barberName || null,
     hasOpenings: openings.length > 0,
     openings,
+    nextCalendarDate,
+    nextCalendarDateSpoken: spokenDate(nextCalendarDate),
+    nextCalendarDateRelativeToShopToday: relativeToShopToday(nextCalendarDate, shopToday),
+    dateGuidance: openings.length > 0
+      ? `Offer only times returned for ${spokenDate(input.date)}.`
+      : `There are no openings on ${spokenDate(input.date)}. To continue, call list_shop_openings for ${nextCalendarDate}, which is ${spokenDate(nextCalendarDate)} and is ${relativeToShopToday(nextCalendarDate, shopToday)} relative to the shop's current date.`,
   };
 }
 
@@ -256,6 +268,8 @@ async function listAvailableSlots(input: {
     service: service.name,
     barber: barber.name,
     date: input.date,
+    dateSpoken: spokenDate(input.date),
+    relativeToShopToday: relativeToShopToday(input.date),
     timeZone: TIME_ZONE,
     slots: slots.map((value) => ({ value, spoken: displayTime(value) })),
   };
@@ -468,9 +482,29 @@ function bookingConfirmation(appointment: Record<string, unknown>, repeated: boo
     service: stringValue(appointment.service),
     barber: stringValue(appointment.barber),
     date: stringValue(appointment.requestedDate),
+    dateSpoken: spokenDate(stringValue(appointment.requestedDate)),
     time: displayTime(stringValue(appointment.requestedTime)),
     customerName: stringValue(appointment.name),
   };
+}
+
+function spokenDate(date: string) {
+  const parsed = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(parsed.valueOf())) return date;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(parsed);
+}
+
+function relativeToShopToday(date: string, today = currentLocalDateTime().date) {
+  if (date === today) return "today";
+  if (date === addCalendarDays(today, 1)) return "tomorrow";
+  if (date === addCalendarDays(today, 2)) return "the day after tomorrow";
+  return "a later date";
 }
 
 function parseArguments(value: unknown): Record<string, unknown> {

@@ -10,13 +10,13 @@
   },
   {
     "name": "list_shop_openings",
-    "description": "Check booked appointments and working hours to find openings on a requested local date, either across all active barbers or for a caller's preferred barber. Use before requiring a service when a caller wants to schedule and is choosing a barber, day, or time. Pass today or tomorrow exactly when the caller uses a relative date so the server resolves it in the shop's timezone. Omit date to check today and omit barberName when anyone is acceptable.",
+    "description": "Check booked appointments and working hours to find openings on a requested local date, either across all active barbers or for a caller's preferred barber. Use before requiring a service when a caller wants to schedule and is choosing a barber, day, or time. Pass today or tomorrow exactly when the caller uses a relative date so the server resolves it in the shop's timezone. The response's dateSpoken and relativeToShopToday fields are authoritative; never calculate a weekday or relative-day name yourself. If there are no openings, follow dateGuidance and check nextCalendarDate before offering it. Omit date to check today and omit barberName when anyone is acceptable.",
     "parameters": {
       "type": "object",
       "properties": {
         "date": {
           "type": "string",
-          "description": "Optional date. Pass today, tomorrow, or day after tomorrow exactly when spoken by the caller; otherwise use YYYY-MM-DD. Omit to check today. Never guess the year for a relative date."
+          "description": "Optional date. Pass today, tomorrow, or day after tomorrow exactly when spoken by the caller; otherwise use YYYY-MM-DD. Omit to check today. Never guess the year or weekday for a relative date; speak the dateSpoken value returned by the tool."
         },
         "barberName": {
           "type": "string",
@@ -42,7 +42,7 @@
   },
   {
     "name": "list_available_slots",
-    "description": "Return currently open 30-minute appointment start times for an eligible barber on a specific local calendar date. Call this immediately before offering times and again if the caller changes the barber, service, or date.",
+    "description": "Return currently open 30-minute appointment start times for an eligible barber on a specific local calendar date. Call this immediately before offering times and again if the caller changes the barber, service, or date. Speak the returned dateSpoken value and never calculate the weekday yourself.",
     "parameters": {
       "type": "object",
       "properties": {
