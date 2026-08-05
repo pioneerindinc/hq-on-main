@@ -73,7 +73,7 @@ export async function runVoiceTool(
         break;
       case "list_shop_openings":
         result = await listShopOpenings({
-          date: optionalStringArg(args, "date") || currentLocalDateTime().date,
+          date: resolveVoiceAvailabilityDate(optionalStringArg(args, "date") || "today"),
           barberName: optionalStringArg(args, "barberName"),
         });
         break;
@@ -419,7 +419,26 @@ function validateBookableDate(date: string) {
     throw new VoiceToolError("Use a valid date in YYYY-MM-DD format.");
   }
   const today = currentLocalDateTime().date;
-  if (date < today) throw new VoiceToolError("Appointments cannot be booked in the past.");
+  if (date < today) {
+    throw new VoiceToolError(
+      `Appointments cannot be booked in the past. Today at the shop is ${today}. For relative dates, call list_shop_openings with today or tomorrow instead of guessing the year.`,
+    );
+  }
+}
+
+function resolveVoiceAvailabilityDate(value: string) {
+  const normalized = value.trim().toLocaleLowerCase();
+  const today = currentLocalDateTime().date;
+  if (/\btoday\b/.test(normalized)) return today;
+  if (/\bday after tomorrow\b/.test(normalized)) return addCalendarDays(today, 2);
+  if (/\btomorrow\b/.test(normalized)) return addCalendarDays(today, 1);
+  return value.trim();
+}
+
+function addCalendarDays(date: string, days: number) {
+  const parsed = new Date(`${date}T12:00:00Z`);
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
 }
 
 function currentLocalDateTime() {

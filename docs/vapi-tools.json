@@ -10,13 +10,13 @@
   },
   {
     "name": "list_shop_openings",
-    "description": "Check booked appointments and working hours to find openings on a requested local date, either across all active barbers or for a caller's preferred barber. Use before requiring a service when a caller wants to schedule and is choosing a barber, day, or time. Omit date to check today and omit barberName when anyone is acceptable.",
+    "description": "Check booked appointments and working hours to find openings on a requested local date, either across all active barbers or for a caller's preferred barber. Use before requiring a service when a caller wants to schedule and is choosing a barber, day, or time. Pass today or tomorrow exactly when the caller uses a relative date so the server resolves it in the shop's timezone. Omit date to check today and omit barberName when anyone is acceptable.",
     "parameters": {
       "type": "object",
       "properties": {
         "date": {
           "type": "string",
-          "description": "Optional local appointment date in YYYY-MM-DD format. Omit to check today."
+          "description": "Optional date. Pass today, tomorrow, or day after tomorrow exactly when spoken by the caller; otherwise use YYYY-MM-DD. Omit to check today. Never guess the year for a relative date."
         },
         "barberName": {
           "type": "string",
