@@ -1,9 +1,11 @@
 import { ObjectId } from "mongodb";
 import {
+  type DailyHours,
   dayNumber,
   defaultHours,
   displayTime,
   generateHalfHourSlots,
+  isSlotDuringBreak,
   normalizeTime,
 } from "@/lib/booking";
 import { getStaffCollection } from "@/lib/auth";
@@ -34,7 +36,7 @@ export async function GET(request: Request) {
   const client = await getMongoClient();
   const db = client.db("hqonmain");
   const dayOfWeek = dayNumber(date);
-  const customHours = await db.collection("availability").findOne({
+  const customHours = await db.collection<DailyHours>("availability").findOne({
     barberId: barber._id,
     dayOfWeek,
   });
@@ -59,6 +61,7 @@ export async function GET(request: Request) {
   const slots = generateHalfHourSlots(String(hours.start), String(hours.end))
     .filter((time) => {
       if (occupied.has(time)) return false;
+      if (isSlotDuringBreak(time, hours)) return false;
       if (date !== today) return true;
       const [hour, minute] = time.split(":").map(Number);
       return hour * 60 + minute > currentMinutes;

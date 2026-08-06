@@ -1,7 +1,7 @@
 import "server-only";
 
 import { ObjectId, type Db } from "mongodb";
-import { displayTime, normalizeTime } from "@/lib/booking";
+import { displayTime, formatDisplayDate, normalizeTime } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
 
 const DATABASE_NAME = "hqonmain";
@@ -25,7 +25,7 @@ export async function sendAppointmentConfirmation(appointment: SmsAppointment) {
 
   const message =
     `HQ on Main: ${text(appointment.name)}, your ${text(appointment.service)} with ` +
-    `${text(appointment.barber)} is confirmed for ${readableDate(text(appointment.requestedDate))} ` +
+    `${text(appointment.barber)} is confirmed for ${formatDisplayDate(text(appointment.requestedDate))} ` +
     `at ${displayTime(text(appointment.requestedTime))}. Reply STOP to unsubscribe or HELP for help.`;
 
   return sendAppointmentMessage(appointment, "confirmation", message);
@@ -36,7 +36,7 @@ export async function sendAppointmentReminder(appointment: SmsAppointment) {
 
   const message =
     `Reminder from HQ on Main: your ${text(appointment.service)} with ` +
-    `${text(appointment.barber)} is ${readableDate(text(appointment.requestedDate))} at ` +
+    `${text(appointment.barber)} is ${formatDisplayDate(text(appointment.requestedDate))} at ` +
     `${displayTime(text(appointment.requestedTime))}. Reply STOP to unsubscribe or HELP for help.`;
 
   return sendAppointmentMessage(appointment, "reminder", message);
@@ -219,17 +219,6 @@ function normalizeE164(phone: string) {
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
   return "";
-}
-
-function readableDate(date: string) {
-  const parsed = new Date(`${date}T12:00:00Z`);
-  if (Number.isNaN(parsed.valueOf())) return date;
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "UTC",
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  }).format(parsed);
 }
 
 function zonedParts(date: Date) {

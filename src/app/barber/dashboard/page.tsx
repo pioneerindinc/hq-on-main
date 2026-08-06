@@ -2,14 +2,21 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ObjectId } from "mongodb";
 import {
-  addBarberAppointment,
   saveAvailability,
   saveBarberServices,
   updateBarberAppointment,
 } from "@/app/actions/staff";
+import { BarberAddAppointmentForm } from "@/components/barber-add-appointment-form";
+import { RegisterPerformance } from "@/components/register-performance";
 import { StaffHeader } from "@/components/staff-header";
 import { requireStaffRole } from "@/lib/auth";
+import { currentShopDateTime, defaultHours } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
+import {
+  type PerformancePayout,
+  buildPerformancePeriods,
+  performanceRangeStart,
+} from "@/lib/register-performance";
 import { SERVICE_CATALOG, SERVICE_IDS } from "@/lib/services";
 
 export const metadata: Metadata = {
@@ -24,15 +31,24 @@ const dashboardTabs = [
   { id: "services", label: "Services", description: "What you offer" },
   { id: "add", label: "Add appointment", description: "Create a booking" },
   { id: "appointments", label: "Appointments", description: "Manage your guests" },
+  { id: "totals", label: "Totals", description: "Register and completed cuts" },
 ] as const;
 
 type DashboardTab = (typeof dashboardTabs)[number]["id"];
 
 type Availability = {
   day: string;
+  dayOfWeek: number;
   enabled: boolean;
   start: string;
   end: string;
+  breakEnabled?: boolean;
+  breakStart?: string;
+  breakEnd?: string;
+};
+
+type BarberPerformancePayout = PerformancePayout & {
+  barberId?: ObjectId;
 };
 
 type Appointment = {
@@ -44,7 +60,11 @@ type Appointment = {
   requestedDate?: string;
   requestedTime?: string;
   status?: string;
+  visitType?: string;
+  source?: string;
   notes?: string;
+  checkoutAmountCents?: number;
+  checkoutMethod?: string;
 };
 
 function timeInputValue(time?: string) {
@@ -71,22 +91,60 @@ export default async function BarberDashboard({
   const barber = await requireStaffRole("barber");
   const client = await getMongoClient();
   const db = client.db("hqonmain");
-  const [availabilityRows, appointments] = await Promise.all([
+  const barberAppointmentFilter = { $or: [{ barberId: barber._id }, { barber: barber.name }] };
+  const today = currentShopDateTime().date;
+  const rangeStart = performanceRangeStart(today);
+  const [availabilityRows, appointments, activeAppointmentSlots, performanceSales, performancePayouts] = await Promise.all([
     db.collection<Availability>("availability").find({ barberId: barber._id }).toArray(),
     db.collection<Appointment>("appointments")
-      .find({ $or: [{ barberId: barber._id }, { barber: barber.name }] })
+      .find(barberAppointmentFilter)
       .sort({ requestedDate: 1, requestedTime: 1 })
       .limit(100)
       .toArray(),
+    db.collection<Appointment>("appointments")
+      .find({
+        ...barberAppointmentFilter,
+        status: { $nin: ["cancelled", "completed", "no-show"] },
+      })
+      .project({ requestedDate: 1, requestedTime: 1 })
+      .toArray(),
+    db.collection<Appointment>("appointments").find({
+      ...barberAppointmentFilter,
+      requestedDate: { $gte: rangeStart, $lte: today },
+      status: "completed",
+      checkoutMethod: "cash",
+      checkoutAmountCents: { $gte: 0 },
+    }).toArray(),
+    db.collection<BarberPerformancePayout>("commissionPayouts").find({
+      barberId: barber._id,
+      businessDate: { $gte: rangeStart, $lte: today },
+    }).toArray(),
   ]);
   const availability = new Map(availabilityRows.map((row) => [row.day, row]));
   const { error, tab } = await searchParams;
-  const activeTab: DashboardTab = isDashboardTab(tab) ? tab : "availability";
+  const activeTab: DashboardTab = isDashboardTab(tab) ? tab : "totals";
   const selectedServices = barber.services ?? [...SERVICE_IDS];
   const offeredServices = SERVICE_CATALOG.filter((service) =>
     selectedServices.includes(service.id),
   );
-  const today = new Date().toISOString().slice(0, 10);
+  const weeklySchedule = days.map((day, index) => {
+    const row = availability.get(day);
+    const fallback = defaultHours(index + 1);
+    return {
+      dayOfWeek: index + 1,
+      enabled: row?.enabled ?? fallback.enabled,
+      start: row?.start ?? fallback.start,
+      end: row?.end ?? fallback.end,
+      breakEnabled: row?.breakEnabled ?? false,
+      breakStart: row?.breakStart ?? "12:00",
+      breakEnd: row?.breakEnd ?? "13:00",
+    };
+  });
+  const bookedSlots = activeAppointmentSlots.map((appointment) => ({
+      date: appointment.requestedDate ?? "",
+      time: appointment.requestedTime ?? "",
+  }));
+  const performancePeriods = buildPerformancePeriods(performanceSales, performancePayouts, today);
   const upcoming = appointments.filter(
     (appointment) =>
       (appointment.requestedDate ?? "") >= today &&
@@ -102,6 +160,7 @@ export default async function BarberDashboard({
           <div className="portal-stats">
             <div><strong>{upcoming.length}</strong><span>Upcoming</span></div>
             <div><strong>{appointments.length}</strong><span>Total records</span></div>
+            <div><strong>{barber.commissionPercentage ?? 0}%</strong><span>Your commission</span></div>
           </div>
         </section>
         {error && <p className="portal-alert error" role="alert">{error}</p>}
@@ -128,26 +187,49 @@ export default async function BarberDashboard({
           </aside>
 
           <div className="portal-tab-panel">
+            {activeTab === "totals" && (
+              <section className="portal-section">
+                <div className="portal-section-heading">
+                  <div><h2>Your totals</h2></div>
+                  <p>Completed cash sales and recorded commission payouts.</p>
+                </div>
+                <RegisterPerformance periods={performancePeriods} />
+              </section>
+            )}
+
             {activeTab === "availability" && (
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Weekly availability</h2></div>
                 </div>
                 <form className="availability-form" action={saveAvailability}>
-                  {days.map((day) => {
+                  {days.map((day, index) => {
                     const row = availability.get(day);
+                    const fallback = defaultHours(index + 1);
                     return (
                       <div className="availability-row" key={day}>
                         <label className="availability-toggle">
                           <input
                             name={`${day}_enabled`}
                             type="checkbox"
-                            defaultChecked={row?.enabled ?? day !== "sunday"}
+                            defaultChecked={row?.enabled ?? fallback.enabled}
                           />
                           <span>{day}</span>
                         </label>
-                        <label>From<input name={`${day}_start`} type="time" defaultValue={row?.start ?? "09:00"} /></label>
-                        <label>To<input name={`${day}_end`} type="time" defaultValue={row?.end ?? "17:00"} /></label>
+                        <label>From<input name={`${day}_start`} type="time" defaultValue={row?.start ?? fallback.start} /></label>
+                        <label>To<input name={`${day}_end`} type="time" defaultValue={row?.end ?? fallback.end} /></label>
+                        <div className="availability-break">
+                          <label className="availability-break-toggle">
+                            <input
+                              name={`${day}_break_enabled`}
+                              type="checkbox"
+                              defaultChecked={row?.breakEnabled ?? false}
+                            />
+                            <span>Block lunch / break</span>
+                          </label>
+                          <label>Break from<input name={`${day}_break_start`} type="time" defaultValue={row?.breakStart ?? "12:00"} /></label>
+                          <label>Break to<input name={`${day}_break_end`} type="time" defaultValue={row?.breakEnd ?? "13:00"} /></label>
+                        </div>
                       </div>
                     );
                   })}
@@ -184,29 +266,11 @@ export default async function BarberDashboard({
                   <div><h2>Add appointment</h2></div>
                   <p>Add a phone, walk-in, or in-shop booking.</p>
                 </div>
-                <form className="portal-form portal-form-grid" action={addBarberAppointment}>
-                  <label>Guest name<input name="name" required /></label>
-                  <label>Phone<input name="phone" type="tel" required /></label>
-                  <label>Email<input name="email" type="email" required /></label>
-                  <label>Service
-                    <select name="service" required defaultValue="">
-                      <option value="" disabled>Select service</option>
-                      {offeredServices.map((service) => (
-                        <option key={service.id} value={service.name}>
-                          {service.name} · {service.price}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>Date<input name="date" type="date" required /></label>
-                  <label>Time<input name="time" type="time" required /></label>
-                  <label className="portal-wide">Notes<input name="notes" placeholder="Optional notes" /></label>
-                  <label className="account-check portal-wide">
-                    <input name="smsConsent" type="checkbox" />
-                    <span>After hearing the HQ on Main SMS disclosure, the customer explicitly agreed to receive up to 2 appointment texts.</span>
-                  </label>
-                  <button className="button button-primary portal-wide" type="submit">Add appointment</button>
-                </form>
+                <BarberAddAppointmentForm
+                  bookedSlots={bookedSlots}
+                  schedule={weeklySchedule}
+                  services={offeredServices}
+                />
               </section>
             )}
 
@@ -223,13 +287,23 @@ export default async function BarberDashboard({
                       <input type="hidden" name="appointmentId" value={appointment._id.toString()} />
                       <div className="appointment-person">
                         <span>{(appointment.name ?? "?").slice(0, 1)}</span>
-                        <div><h3>{appointment.name ?? "Guest"}</h3><p>{appointment.service ?? "Service"} · {appointment.phone}</p></div>
+                        <div>
+                          <h3>{appointment.name ?? "Guest"}</h3>
+                          <p>{appointment.phone}</p>
+                          <p className="appointment-service"><small>Service</small><strong>{appointment.service ?? "Not specified"}</strong></p>
+                        </div>
                       </div>
                       <label>Date<input name="date" type="date" defaultValue={appointment.requestedDate} required /></label>
                       <label>Time<input name="time" type="time" defaultValue={timeInputValue(appointment.requestedTime)} required /></label>
                       <label>Status
                         <select name="status" defaultValue={appointment.status ?? "pending"}>
                           {statuses.map((status) => <option key={status}>{status}</option>)}
+                        </select>
+                      </label>
+                      <label>Visit type
+                        <select name="visitType" defaultValue={appointment.visitType ?? (appointment.source === "walk-in" ? "walk-in" : "appointment")}>
+                          <option value="appointment">Appointment</option>
+                          <option value="walk-in">Walk-in</option>
                         </select>
                       </label>
                       <label>Notes<input name="notes" defaultValue={appointment.notes ?? ""} /></label>

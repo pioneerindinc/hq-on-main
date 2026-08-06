@@ -7,7 +7,7 @@ import {
   updateCustomerProfile,
 } from "@/app/actions/customer";
 import { CustomerHeader } from "@/components/customer-header";
-import { displayTime } from "@/lib/booking";
+import { currentShopDateTime, displayTime, formatDisplayDate } from "@/lib/booking";
 import { requireCustomer } from "@/lib/customer-auth";
 import { getMongoClient } from "@/lib/mongodb";
 
@@ -38,16 +38,6 @@ function isTab(value?: string): value is Tab {
   return tabs.some((tab) => tab.id === value);
 }
 
-function readableDate(value?: string) {
-  if (!value) return "Date pending";
-  return new Date(`${value}T12:00:00`).toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
 export default async function CustomerDashboard({
   searchParams,
 }: {
@@ -64,7 +54,7 @@ export default async function CustomerDashboard({
     .sort({ requestedDate: -1, requestedTime: -1 })
     .limit(100)
     .toArray();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = currentShopDateTime().date;
   const upcoming = appointments.filter(
     (appointment) =>
       (appointment.requestedDate ?? "") >= today &&
@@ -114,8 +104,7 @@ export default async function CustomerDashboard({
                   {upcoming.map((appointment) => (
                     <article className="customer-appointment-card" key={appointment._id.toString()}>
                       <div className="customer-date-block">
-                        <strong>{new Date(`${appointment.requestedDate}T12:00:00`).getDate()}</strong>
-                        <span>{new Date(`${appointment.requestedDate}T12:00:00`).toLocaleDateString("en-US", { month: "short" })}</span>
+                        <strong>{formatDisplayDate(appointment.requestedDate)}</strong>
                       </div>
                       <div>
                         <span className={`appointment-status ${appointment.status ?? "pending"}`}>{appointment.status ?? "pending"}</span>
@@ -136,7 +125,7 @@ export default async function CustomerDashboard({
                     {history.map((appointment) => (
                       <article key={appointment._id.toString()}>
                         <div><strong>{appointment.service ?? "Appointment"}</strong><span>{appointment.barber ?? "HQ Barber"}</span></div>
-                        <p>{readableDate(appointment.requestedDate)} · {displayTime(appointment.requestedTime ?? "")}</p>
+                        <p>{formatDisplayDate(appointment.requestedDate) || "Date pending"} · {displayTime(appointment.requestedTime ?? "")}</p>
                         <span className={`appointment-status ${appointment.status ?? "completed"}`}>{appointment.status ?? "completed"}</span>
                       </article>
                     ))}

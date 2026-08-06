@@ -15,7 +15,7 @@ export default function Home() {
       <section className="hero" aria-labelledby="hero-title">
         <Image
           className="hero-image"
-          src="/barbershop-hero.png"
+          src="/main_image.jpg"
           alt="Barber finishing a precision fade in a modern barbershop"
           fill
           priority

@@ -14,7 +14,7 @@ export default function TermsPage() {
         <div className="container legal-hero-inner">
           <p className="eyebrow">Website &amp; messaging</p>
           <h1>Terms of Service</h1>
-          <p>Effective August 4, 2026</p>
+          <p>Effective 08/04/2026</p>
         </div>
       </header>
 

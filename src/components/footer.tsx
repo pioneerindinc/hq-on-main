@@ -27,20 +27,19 @@ export function Footer() {
         </div>
         <div className="footer-column">
           <h2>Hours</h2>
-          <p>Tue–Fri · 9am–7pm</p>
-          <p>Saturday · 8am–4pm</p>
-          <p>Sun–Mon · Closed</p>
+          <p>Mon–Fri · 8:30am–6:30pm</p>
+          <p>Saturday · 8:30am–2:00pm</p>
+          <p>Sunday · Closed</p>
         </div>
         <div className="footer-column">
           <h2>Find us</h2>
-          <p>Main Street</p>
+          <p>100 E. Main Street</p>
           <p>Plainfield, IN</p>
-          <a href="tel:+13175550192">(317) 555-0192</a>
+          <a href="tel:+13175550192">(317) 839-9734</a>
         </div>
       </div>
       <div className="container footer-bottom">
         <p>© {new Date().getFullYear()} HQ on Main. All rights reserved.</p>
-        <p>Built for good hair days.</p>
       </div>
     </footer>
   );

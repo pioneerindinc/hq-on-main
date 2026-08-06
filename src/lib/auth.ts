@@ -24,14 +24,20 @@ export type StaffRecord = {
   role: StaffRole;
   active: boolean;
   specialty?: string;
+  nickname?: string;
+  bio?: string;
+  hasPhoto?: boolean;
+  photoUpdatedAt?: Date;
   services?: string[];
+  commissionPercentage?: number;
+  posPinHash?: string;
   passwordHash: string;
   createdAt: Date;
   updatedAt: Date;
 };
 
 export type StaffMember = WithId<StaffRecord>;
-export type AuthenticatedStaff = Omit<StaffMember, "passwordHash">;
+export type AuthenticatedStaff = Omit<StaffMember, "passwordHash" | "posPinHash">;
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -118,8 +124,13 @@ export async function getCurrentStaff(): Promise<AuthenticatedStaff | null> {
 
   if (!staff) return null;
 
-  const { passwordHash: _passwordHash, ...safeStaff } = staff;
+  const {
+    passwordHash: _passwordHash,
+    posPinHash: _posPinHash,
+    ...safeStaff
+  } = staff;
   void _passwordHash;
+  void _posPinHash;
   return safeStaff;
 }
 

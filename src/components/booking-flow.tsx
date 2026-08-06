@@ -1,11 +1,12 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
-import { displayTime } from "@/lib/booking";
+import { displayTime, formatDisplayDate } from "@/lib/booking";
 import { SERVICE_CATALOG, serviceById } from "@/lib/services";
 
-type Barber = { id: string; name: string; specialty: string };
+type Barber = { id: string; name: string; specialty: string; photoUrl?: string | null };
 type Slot = { value: string; label: string };
 type Customer = { name: string; email: string; phone: string };
 type Confirmation = {
@@ -257,7 +258,11 @@ export function BookingFlow() {
                 <div className="booking-barber-grid">
                   {barbers.map((item) => (
                     <button type="button" onClick={() => chooseBarber(item)} key={item.id}>
-                      <span>{item.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
+                      <span className="booking-barber-photo">
+                        {item.photoUrl ? (
+                          <Image src={item.photoUrl} alt="" width={70} height={70} />
+                        ) : item.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}
+                      </span>
                       <div><h3>{item.name}</h3><p>{item.specialty}</p></div>
                       <b>Choose →</b>
                     </button>
@@ -308,7 +313,7 @@ export function BookingFlow() {
                               setLoading(true);
                             }}
                             key={item.value}
-                            aria-label={new Date(`${item.value}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+                            aria-label={formatDisplayDate(item.value)}
                           >
                             {item.day}
                           </button>
@@ -317,7 +322,7 @@ export function BookingFlow() {
                     </div>
                   </div>
                   <div className="booking-times">
-                    <h3>{date ? new Date(`${date}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) : "Select a date"}</h3>
+                    <h3>{date ? formatDisplayDate(date) : "Select a date"}</h3>
                     {!date && <p className="booking-empty-inline">Choose a day on the calendar to see open times.</p>}
                     {date && loading && <p className="booking-loading">Checking the chair…</p>}
                     {date && !loading && slots.length === 0 && <p className="booking-empty-inline">No openings on this day. Choose another date.</p>}
@@ -390,7 +395,7 @@ export function BookingFlow() {
                 <div>
                   <span><small>Service</small><strong>{confirmation.appointment.service}</strong></span>
                   <span><small>Barber</small><strong>{confirmation.appointment.barber}</strong></span>
-                  <span><small>Date</small><strong>{new Date(`${confirmation.appointment.date}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</strong></span>
+                  <span><small>Date</small><strong>{formatDisplayDate(confirmation.appointment.date)}</strong></span>
                   <span><small>Time</small><strong>{displayTime(confirmation.appointment.time)}</strong></span>
                 </div>
                 <Link className="button button-outline" href="/">Back to homepage</Link>
@@ -404,7 +409,7 @@ export function BookingFlow() {
               <dl>
                 <div><dt>Service</dt><dd>{service?.name ?? "Not selected"} {service && <b>{service.price}</b>}</dd></div>
                 <div><dt>Barber</dt><dd>{barber?.name ?? "Not selected"}</dd></div>
-                <div><dt>Date</dt><dd>{date ? new Date(`${date}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "Not selected"}</dd></div>
+                <div><dt>Date</dt><dd>{date ? formatDisplayDate(date) : "Not selected"}</dd></div>
                 <div><dt>Time</dt><dd>{time ? displayTime(time) : "Not selected"}</dd></div>
               </dl>
               <p className="summary-note">HQ is cash only. An ATM is available in the shop.</p>

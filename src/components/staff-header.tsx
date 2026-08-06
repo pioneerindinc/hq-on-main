@@ -19,9 +19,12 @@ export function StaffHeader({
           <span>{area} portal</span>
           <strong>{name}</strong>
         </div>
-        <form action={logout}>
-          <button className="staff-logout" type="submit">Log out</button>
-        </form>
+        <div className="staff-header-actions">
+          <Link className="staff-pos-link" href="/pos">Open POS</Link>
+          <form action={logout}>
+            <button className="staff-logout" type="submit">Log out</button>
+          </form>
+        </div>
       </div>
     </header>
   );

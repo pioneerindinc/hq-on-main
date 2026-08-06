@@ -4,10 +4,12 @@ import { timingSafeEqual } from "node:crypto";
 import { ObjectId } from "mongodb";
 import { getStaffCollection } from "@/lib/auth";
 import {
+  type DailyHours,
   dayNumber,
   defaultHours,
   displayTime,
   generateHalfHourSlots,
+  isSlotDuringBreak,
   normalizeTime,
 } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
@@ -388,7 +390,7 @@ async function availableSlots(barberId: ObjectId, barberName: string, date: stri
   const client = await getMongoClient();
   const db = client.db(DATABASE_NAME);
   const dayOfWeek = dayNumber(date);
-  const customHours = await db.collection("availability").findOne({
+  const customHours = await db.collection<DailyHours>("availability").findOne({
     barberId,
     dayOfWeek,
   });
@@ -411,6 +413,7 @@ async function availableSlots(barberId: ObjectId, barberName: string, date: stri
 
   return generateHalfHourSlots(String(hours.start), String(hours.end)).filter((time) => {
     if (occupied.has(time)) return false;
+    if (isSlotDuringBreak(time, hours)) return false;
     if (date !== current.date) return true;
     return time > current.time;
   });

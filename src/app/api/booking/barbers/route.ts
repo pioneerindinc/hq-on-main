@@ -1,4 +1,5 @@
 import { getStaffCollection } from "@/lib/auth";
+import { barberPhotoUrl } from "@/lib/barber-profile";
 import { serviceById } from "@/lib/services";
 
 export async function GET(request: Request) {
@@ -22,6 +23,9 @@ export async function GET(request: Request) {
       id: barber._id.toString(),
       name: barber.name,
       specialty: barber.specialty ?? "HQ Barber",
+      photoUrl: barber.hasPhoto
+        ? barberPhotoUrl(barber._id.toString(), barber.photoUpdatedAt)
+        : null,
     })),
   });
 }

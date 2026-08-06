@@ -1,7 +1,7 @@
 import { ObjectId } from "mongodb";
 import { createCustomerSession, getCurrentCustomer, getCustomerCollection } from "@/lib/customer-auth";
 import { hashPassword, getStaffCollection } from "@/lib/auth";
-import { dayNumber, defaultHours, generateHalfHourSlots, normalizeTime } from "@/lib/booking";
+import { type DailyHours, dayNumber, defaultHours, isSlotWithinHours, normalizeTime } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
 import { serviceById } from "@/lib/services";
 import { sendAppointmentConfirmation } from "@/lib/twilio-sms";
@@ -38,12 +38,12 @@ export async function POST(request: Request) {
     const client = await getMongoClient();
     const db = client.db("hqonmain");
     const dayOfWeek = dayNumber(date);
-    const customHours = await db.collection("availability").findOne({
+    const customHours = await db.collection<DailyHours>("availability").findOne({
       barberId: barber._id,
       dayOfWeek,
     });
     const hours = customHours ?? defaultHours(dayOfWeek);
-    if (!hours.enabled || !generateHalfHourSlots(String(hours.start), String(hours.end)).includes(time)) {
+    if (!isSlotWithinHours(time, hours)) {
       return Response.json({ message: "That time is outside the barber’s availability." }, { status: 409 });
     }
 

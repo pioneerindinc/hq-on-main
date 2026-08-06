@@ -12,22 +12,10 @@ export default function AboutPage() {
   return (
     <main>
       <section className="inner-hero inner-hero-about">
-        <div className="inner-hero-mark" aria-hidden="true">MAIN</div>
-        <div className="container inner-hero-content">
-          <p className="eyebrow">This is HQ</p>
-          <h1>Built local.<br /><span>Cut different.</span></h1>
-          <p>
-            An independent barbershop grounded in craft, community, and making
-            time in the chair the best part of your week.
-          </p>
-        </div>
-      </section>
-
-      <section className="page-section story-section">
         <div className="container story-grid">
           <div className="story-image">
             <Image
-              src="/barbershop-hero.png"
+              src="/main_image.jpg"
               alt="A barber at work inside HQ on Main"
               fill
               sizes="(max-width: 850px) 100vw, 48vw"
@@ -36,51 +24,49 @@ export default function AboutPage() {
           </div>
           <div className="story-copy">
             <p className="eyebrow">Our story</p>
-            <h2>A shop with a point of view.</h2>
             <p className="story-lead">
               HQ on Main was created to bring old-school barbershop care into a
               space that feels current, welcoming, and distinctly local.
             </p>
-            <p>
-              We believe a great cut begins long before the first pass of the
-              clippers. It starts with knowing your name, listening to what you
-              want, and understanding how your hair fits your life.
+            <p className="story-lead">
+              Headquarters Barbershop has been a staple to the town of
+              Plainfield since 1970. 
             </p>
-            <p>
-              That is why we never rush the consultation, never hide behind
-              trends, and never call it finished until the details are right.
-              HQ is a place to reset, catch up, and walk out ready.
+            <br></br>
+            <p className="story-lead">
+              Barbershops may be the place to go when you want a fresh, new
+              look, but they are also a classic gathering spot in local
+              communities. At Headquarters on Main Barbershop, our goal is to
+              provide a warm welcome to everyone who comes through the door. We
+              love creating a comfortable atmosphere as well as offering
+              personal service that transitions guests from customers to family.
+            </p>
+            <br></br>
+            <p className="story-lead">
+              With every men's haircut, you get to enjoy a hot lather, straight
+              razor neck shave, and hot towel finish. Come join our family
+              atmosphere! 
+            </p>
+            <br></br>
+            <p className="story-lead">
+              Get in touch to book a service or stop in! We look
+              forward to serving the Plainfield and surrounding Communities for
+              Generations to come! Also serving Indianapolis, Mooresville, Avon,
+              Danville, Greencastle, Brownsburg, Hendricks County.
             </p>
           </div>
         </div>
       </section>
 
-      <section className="numbers-section">
-        <div className="container numbers-grid">
-          <div><strong>10+</strong><span>Years serving the community</span></div>
-          <div><strong>4.9</strong><span>Average guest rating</span></div>
-          <div><strong>3</strong><span>Barbers, one standard</span></div>
-          <div><strong>100%</strong><span>Independent and local</span></div>
-        </div>
-      </section>
-
-      <section className="page-section values-section">
-        <div className="container">
-          <div className="page-section-heading">
-            <div><p className="eyebrow">What matters here</p><h2>Our values show.</h2></div>
-          </div>
-          <div className="values-grid">
-            <article><span>01</span><h3>Craft over hype</h3><p>Technique, consistency, and a cut that works for you will always matter more than whatever is trending.</p></article>
-            <article><span>02</span><h3>People over numbers</h3><p>You are not the next appointment. You are a regular in the making, and we treat your time that way.</p></article>
-            <article><span>03</span><h3>Community over everything</h3><p>Plainfield is home. We are proud to build a place where neighbors become friends and everyone belongs.</p></article>
-          </div>
-        </div>
-      </section>
-
-      <section className="page-cta">
+      <section className="detail-band">
         <div className="container page-cta-inner">
-          <div><p className="eyebrow">Come see us</p><h2>Your chair is waiting.</h2></div>
-          <Link className="button button-primary" href="/book">Book your first visit →</Link>
+          <div>
+            <p className="eyebrow">Come see us</p>
+            <h2>Your chair is waiting.</h2>
+          </div>
+          <Link className="button button-primary" href="/book">
+            Book your first visit →
+          </Link>
         </div>
       </section>
     </main>
