@@ -22,6 +22,7 @@ import {
   getCurrentPosBarber,
 } from "@/lib/pos-auth";
 import { SERVICE_CATALOG, SERVICE_IDS } from "@/lib/services";
+import { sendAppointmentCancellationNotifications } from "@/lib/twilio-sms";
 
 function value(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
@@ -216,13 +217,17 @@ export async function updatePosAppointmentStatus(formData: FormData) {
   }
 
   const client = await getMongoClient();
-  const result = await client.db("hqonmain").collection("appointments").updateOne(
-    {
-      _id: new ObjectId(appointmentId),
-      $or: [{ barberId: barber._id }, { barber: barber.name }],
-      requestedDate: currentShopDateTime().date,
-      status: { $ne: "completed" },
-    },
+  const appointments = client.db("hqonmain").collection("appointments");
+  const filter = {
+    _id: new ObjectId(appointmentId),
+    $or: [{ barberId: barber._id }, { barber: barber.name }],
+    requestedDate: currentShopDateTime().date,
+    status: { $ne: "completed" },
+  };
+  const appointment = await appointments.findOne(filter);
+  if (!appointment) posError("That appointment could not be updated.");
+  const result = await appointments.updateOne(
+    filter,
     {
       $set: {
         status,
@@ -233,6 +238,9 @@ export async function updatePosAppointmentStatus(formData: FormData) {
     },
   );
   if (!result.matchedCount) posError("That appointment could not be updated.");
+  if (appointment.status !== "cancelled" && status === "cancelled") {
+    await sendAppointmentCancellationNotifications({ ...appointment, _id: appointment._id });
+  }
 
   revalidatePath("/pos");
   redirect("/pos");

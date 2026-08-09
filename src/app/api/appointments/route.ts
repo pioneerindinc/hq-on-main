@@ -1,5 +1,6 @@
 import { getMongoClient } from "@/lib/mongodb";
 import { SERVICE_NAMES } from "@/lib/services";
+import { sendBarberNewAppointment } from "@/lib/twilio-sms";
 
 const allowedServices = new Set<string>(SERVICE_NAMES);
 
@@ -45,6 +46,7 @@ export async function POST(request: Request) {
       .db("hqonmain")
       .collection("appointments")
       .insertOne(appointment);
+    await sendBarberNewAppointment({ ...appointment, _id: result.insertedId });
 
     return Response.json(
       { id: result.insertedId.toString(), message: "Appointment requested." },

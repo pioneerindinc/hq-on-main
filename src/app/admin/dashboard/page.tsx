@@ -189,6 +189,7 @@ export default async function AdminDashboard({
                 <form className="portal-form portal-form-grid" action={createBarber}>
                   <label>Full name<input name="name" required minLength={2} /></label>
                   <label>Email<input name="email" type="email" required /></label>
+                  <label>Mobile phone<input name="phone" type="tel" placeholder="(317) 555-0123" /></label>
                   <label>Nickname<input name="nickname" maxLength={60} placeholder="Optional public nickname" /></label>
                   <label>Specialty<input name="specialty" maxLength={120} placeholder="Fades, beard work, classic cuts" /></label>
                   <label>Temporary password<input name="password" type="password" required minLength={10} autoComplete="new-password" /></label>
@@ -196,6 +197,10 @@ export default async function AdminDashboard({
                   <label>POS PIN<input name="posPin" type="password" inputMode="numeric" pattern="[0-9]{4,6}" minLength={4} maxLength={6} required autoComplete="new-password" /></label>
                   <label className="portal-wide">Bio<textarea name="bio" rows={5} maxLength={1200} placeholder="Tell customers about this barber, their approach, and specialties." /></label>
                   <label className="portal-wide">Profile photo<input name="photo" type="file" accept="image/jpeg,image/png,image/webp" /><small>Square JPEG, PNG, or WebP recommended. Maximum 3 MB.</small></label>
+                  <label className="account-check portal-wide">
+                    <input name="smsNotificationsEnabled" type="checkbox" />
+                    <span>The barber agreed to receive automated HQ on Main texts for new and cancelled appointments. Frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or HELP for help.</span>
+                  </label>
                   <button className="button button-primary portal-wide" type="submit">Add barber account</button>
                 </form>
               </section>
@@ -223,6 +228,7 @@ export default async function AdminDashboard({
                       <div className="staff-edit-grid">
                         <label>Name<input name="name" defaultValue={barber.name} required /></label>
                         <label>Email<input name="email" type="email" defaultValue={barber.email} required /></label>
+                        <label>Mobile phone<input name="phone" type="tel" defaultValue={barber.phone ?? ""} placeholder="(317) 555-0123" /></label>
                         <label>Nickname<input name="nickname" maxLength={60} defaultValue={barber.nickname ?? ""} placeholder="Optional public nickname" /></label>
                         <label>Specialty<input name="specialty" maxLength={120} defaultValue={barber.specialty ?? ""} /></label>
                         <label>Access
@@ -253,6 +259,10 @@ export default async function AdminDashboard({
                             <span>Remove the current profile photo</span>
                           </label>
                         )}
+                        <label className="account-check portal-wide">
+                          <input name="smsNotificationsEnabled" type="checkbox" defaultChecked={barber.smsNotificationsEnabled === true} />
+                          <span>The barber agreed to receive automated HQ on Main texts for new and cancelled appointments. Frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or HELP for help.</span>
+                        </label>
                       </div>
                       <button className="portal-save" type="submit">Save changes</button>
                     </form>

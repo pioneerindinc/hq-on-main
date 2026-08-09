@@ -12,6 +12,7 @@ import {
   requireCustomer,
 } from "@/lib/customer-auth";
 import { getMongoClient } from "@/lib/mongodb";
+import { sendAppointmentCancellationNotifications } from "@/lib/twilio-sms";
 
 function value(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
@@ -138,20 +139,24 @@ export async function cancelCustomerAppointment(formData: FormData) {
   }
 
   const client = await getMongoClient();
-  const result = await client
-    .db("hqonmain")
-    .collection("appointments")
-    .updateOne(
-      {
-        _id: new ObjectId(appointmentId),
-        $or: [{ customerId: customer._id }, { email: customer.email }],
-        status: { $in: ["pending", "confirmed"] },
-      },
-      { $set: { status: "cancelled", cancelledAt: new Date(), updatedAt: new Date() } },
-    );
-  if (!result.matchedCount) {
+  const appointments = client.db("hqonmain").collection("appointments");
+  const filter = {
+    _id: new ObjectId(appointmentId),
+    $or: [{ customerId: customer._id }, { email: customer.email }],
+    status: { $in: ["pending", "confirmed"] },
+  };
+  const appointment = await appointments.findOne(filter);
+  if (!appointment) {
     centerMessage("appointments", "error", "This appointment cannot be cancelled.");
   }
+  const result = await appointments.updateOne(
+    filter,
+    { $set: { status: "cancelled", cancelledAt: new Date(), updatedAt: new Date() } },
+  );
+  if (!result.modifiedCount) {
+    centerMessage("appointments", "error", "This appointment cannot be cancelled.");
+  }
+  await sendAppointmentCancellationNotifications({ ...appointment, _id: appointment._id });
   revalidatePath("/customer/dashboard");
   centerMessage("appointments", "success", "Appointment cancelled.");
 }

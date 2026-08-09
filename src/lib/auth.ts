@@ -21,6 +21,10 @@ export type StaffRole = "admin" | "barber";
 export type StaffRecord = {
   name: string;
   email: string;
+  phone?: string;
+  smsNotificationsEnabled?: boolean;
+  smsConsentAt?: Date;
+  smsConsentSource?: string;
   role: StaffRole;
   active: boolean;
   specialty?: string;

@@ -4,7 +4,7 @@ import { hashPassword, getStaffCollection } from "@/lib/auth";
 import { type DailyHours, dayNumber, defaultHours, isSlotWithinHours, normalizeTime } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
 import { serviceById } from "@/lib/services";
-import { sendAppointmentConfirmation } from "@/lib/twilio-sms";
+import { sendAppointmentConfirmation, sendBarberNewAppointment } from "@/lib/twilio-sms";
 
 export async function POST(request: Request) {
   try {
@@ -113,14 +113,16 @@ export async function POST(request: Request) {
       updatedAt: new Date(),
     };
     const result = await db.collection("appointments").insertOne(appointment);
-    const sms = await sendAppointmentConfirmation({
-      ...appointment,
-      _id: result.insertedId,
-    });
+    const savedAppointment = { ...appointment, _id: result.insertedId };
+    const [sms, barberSms] = await Promise.all([
+      sendAppointmentConfirmation(savedAppointment),
+      sendBarberNewAppointment(savedAppointment),
+    ]);
 
     return Response.json({
       confirmationId: result.insertedId.toString().slice(-8).toUpperCase(),
       sms,
+      barberSms,
       appointment: {
         service: service.name,
         price: service.price,

@@ -14,7 +14,7 @@ import {
 } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
 import { SERVICE_CATALOG, serviceById } from "@/lib/services";
-import { sendAppointmentConfirmation } from "@/lib/twilio-sms";
+import { sendAppointmentConfirmation, sendBarberNewAppointment } from "@/lib/twilio-sms";
 
 const DATABASE_NAME = "hqonmain";
 const TIME_ZONE = process.env.BARBERSHOP_TIME_ZONE || "America/Indiana/Indianapolis";
@@ -349,8 +349,11 @@ async function bookAppointment(
   try {
     const result = await db.collection("appointments").insertOne(appointment);
     const savedAppointment = { ...appointment, _id: result.insertedId };
-    const sms = await sendAppointmentConfirmation(savedAppointment);
-    return { ...bookingConfirmation(savedAppointment, false), sms };
+    const [sms, barberSms] = await Promise.all([
+      sendAppointmentConfirmation(savedAppointment),
+      sendBarberNewAppointment(savedAppointment),
+    ]);
+    return { ...bookingConfirmation(savedAppointment, false), sms, barberSms };
   } catch (error) {
     if (isDuplicateKeyError(error)) {
       const duplicate = await db

@@ -15,10 +15,19 @@ import {
 } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
 import { SERVICE_CATALOG, SERVICE_IDS, SERVICE_NAMES } from "@/lib/services";
-import { sendAppointmentConfirmation } from "@/lib/twilio-sms";
+import {
+  sendAppointmentCancellationNotifications,
+  sendAppointmentConfirmation,
+  sendBarberNewAppointment,
+} from "@/lib/twilio-sms";
 
 function value(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
+}
+
+function isValidSmsPhone(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length === 10 || (digits.length === 11 && digits.startsWith("1"));
 }
 
 function dashboardError(area: "admin" | "barber", message: string, tab?: string): never {
@@ -197,7 +206,10 @@ export async function addBarberAppointment(formData: FormData) {
     updatedAt: now,
   };
   const result = await db.collection("appointments").insertOne(appointment);
-  await sendAppointmentConfirmation({ ...appointment, _id: result.insertedId });
+  await Promise.all([
+    sendAppointmentConfirmation({ ...appointment, _id: result.insertedId }),
+    sendBarberNewAppointment({ ...appointment, _id: result.insertedId }),
+  ]);
 
   revalidatePath("/barber/dashboard");
   redirect("/barber/dashboard?tab=appointments");
@@ -222,6 +234,12 @@ export async function updateBarberAppointment(formData: FormData) {
 
   const client = await getMongoClient();
   const db = client.db("hqonmain");
+  const appointmentFilter = {
+    _id: new ObjectId(id),
+    $or: [{ barberId: barber._id }, { barber: barber.name }],
+  };
+  const existing = await db.collection("appointments").findOne(appointmentFilter);
+  if (!existing) dashboardError("barber", "Appointment not found.", "appointments");
   const normalizedInputTime = normalizeTime(time);
   if (!normalizedInputTime) {
     dashboardError("barber", "Choose a valid appointment time.", "appointments");
@@ -236,14 +254,8 @@ export async function updateBarberAppointment(formData: FormData) {
         excludeAppointmentId: new ObjectId(id),
       })
     : normalizedInputTime;
-  const result = await client
-    .db("hqonmain")
-    .collection("appointments")
-    .updateOne(
-      {
-        _id: new ObjectId(id),
-        $or: [{ barberId: barber._id }, { barber: barber.name }],
-      },
+  const result = await db.collection("appointments").updateOne(
+      appointmentFilter,
       {
         $set: {
           requestedDate: date,
@@ -257,6 +269,14 @@ export async function updateBarberAppointment(formData: FormData) {
     );
 
   if (!result.matchedCount) dashboardError("barber", "Appointment not found.", "appointments");
+  if (existing.status !== "cancelled" && status === "cancelled") {
+    await sendAppointmentCancellationNotifications({
+      ...existing,
+      requestedDate: date,
+      requestedTime: normalizedTime,
+      _id: existing._id,
+    });
+  }
   revalidatePath("/barber/dashboard");
 }
 
@@ -336,6 +356,8 @@ export async function createBarber(formData: FormData) {
   await requireStaffRole("admin");
   const name = value(formData, "name");
   const email = value(formData, "email").toLowerCase();
+  const phone = value(formData, "phone");
+  const smsNotificationsEnabled = formData.get("smsNotificationsEnabled") === "on";
   const password = value(formData, "password");
   const posPin = value(formData, "posPin");
   const commissionPercentage = Number(value(formData, "commissionPercentage"));
@@ -347,6 +369,8 @@ export async function createBarber(formData: FormData) {
   if (
     name.length < 2 ||
     !email.includes("@") ||
+    (phone.length > 0 && !isValidSmsPhone(phone)) ||
+    (smsNotificationsEnabled && !isValidSmsPhone(phone)) ||
     password.length < 10 ||
     !/^\d{4,6}$/.test(posPin) ||
     !Number.isFinite(commissionPercentage) ||
@@ -372,6 +396,11 @@ export async function createBarber(formData: FormData) {
   const result = await staff.insertOne({
     name,
     email,
+    phone,
+    smsNotificationsEnabled,
+    ...(smsNotificationsEnabled
+      ? { smsConsentAt: now, smsConsentSource: "admin-barber-profile" }
+      : {}),
     specialty,
     nickname,
     bio,
@@ -401,6 +430,8 @@ export async function updateBarber(formData: FormData) {
 
   const name = value(formData, "name");
   const email = value(formData, "email").toLowerCase();
+  const phone = value(formData, "phone");
+  const smsNotificationsEnabled = formData.get("smsNotificationsEnabled") === "on";
   const commissionPercentage = Number(value(formData, "commissionPercentage"));
   const specialty = value(formData, "specialty");
   const nickname = value(formData, "nickname");
@@ -409,6 +440,8 @@ export async function updateBarber(formData: FormData) {
   if (
     name.length < 2 ||
     !email.includes("@") ||
+    (phone.length > 0 && !isValidSmsPhone(phone)) ||
+    (smsNotificationsEnabled && !isValidSmsPhone(phone)) ||
     !Number.isFinite(commissionPercentage) ||
     commissionPercentage < 0 ||
     commissionPercentage > 100 ||
@@ -422,6 +455,8 @@ export async function updateBarber(formData: FormData) {
   const update: Record<string, unknown> = {
     name,
     email,
+    phone,
+    smsNotificationsEnabled,
     specialty,
     nickname,
     bio,
@@ -429,6 +464,10 @@ export async function updateBarber(formData: FormData) {
     active: value(formData, "active") === "true",
     updatedAt: new Date(),
   };
+  if (smsNotificationsEnabled) {
+    update.smsConsentAt = new Date();
+    update.smsConsentSource = "admin-barber-profile";
+  }
 
   const newPassword = value(formData, "password");
   if (newPassword) {
@@ -600,8 +639,13 @@ export async function createAdminAppointment(formData: FormData) {
     updatedAt: now,
   };
   const result = await db.collection("appointments").insertOne(appointment);
-  if (values.status === "confirmed") {
-    await sendAppointmentConfirmation({ ...appointment, _id: result.insertedId });
+  if (["pending", "confirmed"].includes(values.status)) {
+    await Promise.all([
+      values.status === "confirmed"
+        ? sendAppointmentConfirmation({ ...appointment, _id: result.insertedId })
+        : Promise.resolve({ sent: false, reason: "not-confirmed" }),
+      sendBarberNewAppointment({ ...appointment, _id: result.insertedId }),
+    ]);
   }
 
   revalidatePath("/admin/dashboard");
@@ -630,6 +674,10 @@ export async function updateAdminAppointment(formData: FormData) {
     dashboardError("admin", "That barber already has an appointment at this time.", "appointments");
   }
   const customer = await db.collection("customers").findOne({ email: values.email });
+  const existing = await db.collection("appointments").findOne({
+    _id: new ObjectId(appointmentId),
+  });
+  if (!existing) dashboardError("admin", "Appointment not found.", "appointments");
 
   const result = await db.collection("appointments").updateOne(
     { _id: new ObjectId(appointmentId) },
@@ -654,6 +702,19 @@ export async function updateAdminAppointment(formData: FormData) {
     },
   );
   if (!result.matchedCount) dashboardError("admin", "Appointment not found.", "appointments");
+  if (existing.status !== "cancelled" && values.status === "cancelled") {
+    await sendAppointmentCancellationNotifications({
+      ...existing,
+      name: values.name,
+      phone: values.phone,
+      service: values.serviceName,
+      barber: values.barber.name,
+      barberId: values.barber._id,
+      requestedDate: values.date,
+      requestedTime: values.time,
+      _id: existing._id,
+    });
+  }
 
   revalidatePath("/admin/dashboard");
   redirect("/admin/dashboard?tab=appointments");

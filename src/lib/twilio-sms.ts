@@ -13,12 +13,20 @@ export type SmsAppointment = {
   phone?: unknown;
   service?: unknown;
   barber?: unknown;
+  barberId?: unknown;
   requestedDate?: unknown;
   requestedTime?: unknown;
   smsConsent?: unknown;
 };
 
-type SmsKind = "confirmation" | "reminder";
+type SmsKind =
+  | "confirmation"
+  | "reminder"
+  | "cancellation"
+  | "barber-new-appointment"
+  | "barber-cancellation";
+
+type SmsAudience = "customer" | "barber";
 
 export async function sendAppointmentConfirmation(appointment: SmsAppointment) {
   if (appointment.smsConsent !== true) return { sent: false, reason: "no-consent" };
@@ -40,6 +48,45 @@ export async function sendAppointmentReminder(appointment: SmsAppointment) {
     `${displayTime(text(appointment.requestedTime))}. Reply STOP to unsubscribe or HELP for help.`;
 
   return sendAppointmentMessage(appointment, "reminder", message);
+}
+
+export async function sendAppointmentCancellation(appointment: SmsAppointment) {
+  if (appointment.smsConsent !== true) return { sent: false, reason: "no-consent" };
+
+  const message =
+    `HQ on Main: Your ${text(appointment.service)} with ${text(appointment.barber)} on ` +
+    `${formatDisplayDate(text(appointment.requestedDate))} at ` +
+    `${displayTime(text(appointment.requestedTime))} has been cancelled. ` +
+    `Reply STOP to unsubscribe or HELP for help.`;
+
+  return sendAppointmentMessage(appointment, "cancellation", message);
+}
+
+export async function sendBarberNewAppointment(appointment: SmsAppointment) {
+  const message =
+    `HQ on Main staff alert: New appointment for ${text(appointment.name)}, ` +
+    `${text(appointment.service)}, ${formatDisplayDate(text(appointment.requestedDate))} at ` +
+    `${displayTime(text(appointment.requestedTime))}. Reply STOP to unsubscribe or HELP for help.`;
+
+  return sendBarberAppointmentMessage(appointment, "barber-new-appointment", message);
+}
+
+export async function sendBarberAppointmentCancellation(appointment: SmsAppointment) {
+  const message =
+    `HQ on Main staff alert: ${text(appointment.name)}'s ${text(appointment.service)} appointment on ` +
+    `${formatDisplayDate(text(appointment.requestedDate))} at ` +
+    `${displayTime(text(appointment.requestedTime))} was cancelled. ` +
+    `Reply STOP to unsubscribe or HELP for help.`;
+
+  return sendBarberAppointmentMessage(appointment, "barber-cancellation", message);
+}
+
+export async function sendAppointmentCancellationNotifications(appointment: SmsAppointment) {
+  const [customer, barber] = await Promise.all([
+    sendAppointmentCancellation(appointment),
+    sendBarberAppointmentCancellation(appointment),
+  ]);
+  return { customer, barber };
 }
 
 export function isSmsConfigured() {
@@ -99,10 +146,49 @@ async function sendAppointmentMessage(
   kind: SmsKind,
   body: string,
 ) {
+  return sendMessage(appointment, kind, body, text(appointment.phone), "customer");
+}
+
+async function sendBarberAppointmentMessage(
+  appointment: SmsAppointment,
+  kind: "barber-new-appointment" | "barber-cancellation",
+  body: string,
+) {
+  const client = await getMongoClient();
+  const db = client.db(DATABASE_NAME);
+  const barberId = objectId(appointment.barberId);
+  const barberName = text(appointment.barber);
+  const barber = await db.collection("staff").findOne({
+    role: "barber",
+    active: true,
+    smsNotificationsEnabled: true,
+    ...(barberId ? { _id: barberId } : { name: barberName }),
+  });
+  if (!barber) {
+    await recordSms(db, {
+      appointmentId: appointment._id,
+      kind,
+      audience: "barber",
+      status: "barber-not-enabled",
+      createdAt: new Date(),
+    });
+    return { sent: false, reason: "barber-not-enabled" };
+  }
+
+  return sendMessage(appointment, kind, body, text(barber.phone), "barber");
+}
+
+async function sendMessage(
+  appointment: SmsAppointment,
+  kind: SmsKind,
+  body: string,
+  phone: string,
+  audience: SmsAudience,
+) {
   const credentials = twilioCredentials();
   const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID?.trim();
   const from = process.env.TWILIO_PHONE_NUMBER?.trim();
-  const to = normalizeE164(text(appointment.phone));
+  const to = normalizeE164(phone);
   const client = await getMongoClient();
   const db = client.db(DATABASE_NAME);
   const now = new Date();
@@ -111,6 +197,7 @@ async function sendAppointmentMessage(
     await recordSms(db, {
       appointmentId: appointment._id,
       kind,
+      audience,
       to,
       status: "not-configured",
       createdAt: now,
@@ -121,6 +208,7 @@ async function sendAppointmentMessage(
     await recordSms(db, {
       appointmentId: appointment._id,
       kind,
+      audience,
       status: "invalid-number",
       createdAt: now,
     });
@@ -160,6 +248,7 @@ async function sendAppointmentMessage(
     await recordSms(db, {
       appointmentId: appointment._id,
       kind,
+      audience,
       to,
       twilioMessageSid: result.sid,
       status: result.status || "queued",
@@ -176,6 +265,7 @@ async function sendAppointmentMessage(
     await recordSms(db, {
       appointmentId: appointment._id,
       kind,
+      audience,
       to,
       status: "failed",
       error: errorMessage,
@@ -183,6 +273,12 @@ async function sendAppointmentMessage(
     });
     return { sent: false, reason: "send-failed" };
   }
+}
+
+function objectId(value: unknown) {
+  if (value instanceof ObjectId) return value;
+  if (typeof value === "string" && ObjectId.isValid(value)) return new ObjectId(value);
+  return null;
 }
 
 function twilioCredentials() {
