@@ -11,7 +11,7 @@ import {
 import { StaffHeader } from "@/components/staff-header";
 import { RegisterPerformance } from "@/components/register-performance";
 import { getStaffCollection, requireStaffRole } from "@/lib/auth";
-import { currentShopDateTime, formatDisplayDate, normalizeTime } from "@/lib/booking";
+import { currentShopDateTime, displayTime, formatDisplayDate, normalizeTime } from "@/lib/booking";
 import { barberPhotoUrl } from "@/lib/barber-profile";
 import { getCustomerCollection } from "@/lib/customer-auth";
 import { getMongoClient } from "@/lib/mongodb";
@@ -59,9 +59,10 @@ function isAdminTab(value?: string): value is AdminTab {
 export default async function AdminDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; tab?: string }>;
+  searchParams: Promise<{ error?: string; tab?: string; customer?: string }>;
 }) {
   const admin = await requireStaffRole("admin");
+  const { error, tab, customer: selectedCustomerId } = await searchParams;
   const staff = await getStaffCollection();
   const customersCollection = await getCustomerCollection();
   const client = await getMongoClient();
@@ -101,7 +102,25 @@ export default async function AdminDashboard({
       }),
     ),
   );
-  const { error, tab } = await searchParams;
+  const selectedCustomer = selectedCustomerId && ObjectId.isValid(selectedCustomerId)
+    ? await customersCollection.findOne({ _id: new ObjectId(selectedCustomerId) })
+    : null;
+  const selectedCustomerAppointments = selectedCustomer
+    ? await db.collection("appointments").find({
+        $or: [{ customerId: selectedCustomer._id }, { email: selectedCustomer.email }],
+      }).sort({ requestedDate: -1, requestedTime: -1 }).toArray()
+    : [];
+  const customerHistoryTotals = selectedCustomerAppointments.reduce(
+    (totals, appointment) => {
+      const status = String(appointment.status ?? "pending");
+      totals.total += 1;
+      if (status === "completed") totals.completed += 1;
+      if (status === "no-show") totals.noShow += 1;
+      if (status === "cancelled") totals.cancelled += 1;
+      return totals;
+    },
+    { total: 0, completed: 0, noShow: 0, cancelled: 0 },
+  );
   const activeTab: AdminTab = isAdminTab(tab) ? tab : "barbers";
   const performanceByBarber = new Map(barbers.map((barber) => {
     const sales = performanceSales.filter((sale) =>
@@ -382,26 +401,76 @@ export default async function AdminDashboard({
 
             {activeTab === "customers" && (
               <section className="portal-section">
-                <div className="portal-section-heading">
-                  <div><h2>Customer accounts</h2></div>
-                  <p>Registered customers and their contact information.</p>
-                </div>
-                <div className="admin-customer-list">
-                  {customers.length === 0 && <p className="portal-empty">No registered customer accounts yet.</p>}
-                  {customers.map((customer, index) => (
-                    <article className="admin-customer-card" key={customer._id.toString()}>
+                {selectedCustomer ? (
+                  <div className="admin-customer-detail">
+                    <Link className="admin-customer-back" href="/admin/dashboard?tab=customers">← Back to all customers</Link>
+                    <div className="admin-customer-detail-heading">
                       <div className="admin-customer-person">
-                        <span>{customer.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
-                        <div><h3>{customer.name}</h3><p>Joined {formatDisplayDate(customer.createdAt)}</p></div>
+                        <span>{selectedCustomer.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
+                        <div>
+                          <p className="eyebrow">Customer history</p>
+                          <h2>{selectedCustomer.name}</h2>
+                          <p>{selectedCustomer.email} · {selectedCustomer.phone}</p>
+                        </div>
                       </div>
-                      <dl>
-                        <div><dt>Email</dt><dd><a href={`mailto:${customer.email}`}>{customer.email}</a></dd></div>
-                        <div><dt>Phone</dt><dd><a href={`tel:${customer.phone}`}>{customer.phone}</a></dd></div>
-                        <div><dt>Appointments</dt><dd>{appointmentCounts[index]}</dd></div>
-                      </dl>
-                    </article>
-                  ))}
-                </div>
+                      <p>Customer since {formatDisplayDate(selectedCustomer.createdAt)}</p>
+                    </div>
+                    <div className="admin-customer-history-stats">
+                      <div><strong>{customerHistoryTotals.total}</strong><span>Total appointments</span></div>
+                      <div><strong>{customerHistoryTotals.completed}</strong><span>Completed</span></div>
+                      <div><strong>{customerHistoryTotals.noShow}</strong><span>No-shows</span></div>
+                      <div><strong>{customerHistoryTotals.cancelled}</strong><span>Cancelled</span></div>
+                    </div>
+                    <div className="admin-customer-history">
+                      {selectedCustomerAppointments.length === 0 && <p className="portal-empty">This customer has no appointment history yet.</p>}
+                      {selectedCustomerAppointments.map((appointment) => {
+                        const status = String(appointment.status ?? "pending");
+                        const visitType = String(appointment.visitType ?? (appointment.source === "walk-in" ? "walk-in" : "appointment"));
+                        return (
+                          <article className="admin-customer-history-row" key={appointment._id.toString()}>
+                            <div className="admin-customer-history-date">
+                              <strong>{formatDisplayDate(String(appointment.requestedDate ?? "")) || "No date"}</strong>
+                              <span>{displayTime(String(appointment.requestedTime ?? "")) || "No time"}</span>
+                            </div>
+                            <div>
+                              <h3>{String(appointment.service ?? "Service not specified")}</h3>
+                              <p>With {String(appointment.barber ?? "Unassigned")} · {visitType === "walk-in" ? "Walk-in" : "Appointment"}</p>
+                            </div>
+                            <span className={`appointment-status ${status}`}>{status}</span>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="portal-section-heading">
+                      <div><h2>Customer accounts</h2></div>
+                      <p>Choose a customer to see their complete appointment history.</p>
+                    </div>
+                    <div className="admin-customer-list">
+                      {customers.length === 0 && <p className="portal-empty">No registered customer accounts yet.</p>}
+                      {customers.map((customer, index) => (
+                        <Link
+                          className="admin-customer-card"
+                          href={`/admin/dashboard?tab=customers&customer=${customer._id.toString()}`}
+                          prefetch={false}
+                          key={customer._id.toString()}
+                        >
+                          <div className="admin-customer-person">
+                            <span>{customer.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
+                            <div><h3>{customer.name}</h3><p>Joined {formatDisplayDate(customer.createdAt)}</p></div>
+                          </div>
+                          <dl>
+                            <div><dt>Email</dt><dd>{customer.email}</dd></div>
+                            <div><dt>Phone</dt><dd>{customer.phone}</dd></div>
+                            <div><dt>Appointments</dt><dd>{appointmentCounts[index]}</dd></div>
+                          </dl>
+                        </Link>
+                      ))}
+                    </div>
+                  </>
+                )}
               </section>
             )}
 

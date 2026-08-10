@@ -3162,6 +3162,40 @@ body:has(.pos-page) {
   font-size: 0.68rem;
 }
 
+.portal-form .account-check,
+.staff-edit-grid .account-check {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  justify-content: start;
+  gap: 10px;
+  color: #b8b8b8;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  line-height: 1.55;
+  text-align: left;
+  text-transform: none;
+}
+
+.portal-form .account-check input[type="checkbox"],
+.staff-edit-grid .account-check input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  padding: 0;
+  accent-color: var(--red);
+}
+
+.portal-form label > small,
+.staff-edit-grid label > small {
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 1.45;
+  text-align: left;
+  text-transform: none;
+}
+
 .portal-slot-field {
   display: flex;
   flex-direction: column;
@@ -3903,6 +3937,15 @@ body:has(.pos-page) {
   border: 1px solid #303030;
   background: #111;
   padding: 20px;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.admin-customer-card:hover {
+  border-color: var(--red);
+  background: #151515;
+  transform: translateY(-1px);
 }
 
 .admin-customer-person {
@@ -3963,8 +4006,114 @@ body:has(.pos-page) {
   white-space: nowrap;
 }
 
-.admin-customer-card a:hover {
+.admin-customer-back {
+  display: inline-flex;
+  width: fit-content;
+  margin-bottom: 22px;
+  color: #bdbdbd;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-customer-back:hover {
   color: var(--red);
+}
+
+.admin-customer-detail-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  border: 1px solid #303030;
+  background: #111;
+  padding: 22px;
+}
+
+.admin-customer-detail-heading .admin-customer-person > span {
+  width: 64px;
+  height: 64px;
+  flex-basis: 64px;
+}
+
+.admin-customer-detail-heading h2 {
+  margin: 2px 0 6px;
+  font-size: 1.3rem;
+}
+
+.admin-customer-detail-heading p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.admin-customer-history-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin: 1px 0 24px;
+  background: #303030;
+}
+
+.admin-customer-history-stats > div {
+  display: flex;
+  min-height: 105px;
+  justify-content: center;
+  flex-direction: column;
+  background: #111;
+  padding: 18px;
+}
+
+.admin-customer-history-stats strong {
+  font-family: var(--font-display), Impact, sans-serif;
+  font-size: 2rem;
+  font-weight: 400;
+}
+
+.admin-customer-history-stats span {
+  margin-top: 5px;
+  color: var(--text-subtle);
+  font-size: 0.57rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-customer-history {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-customer-history-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.45fr) minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 22px;
+  border: 1px solid #303030;
+  background: #111;
+  padding: 18px 20px;
+}
+
+.admin-customer-history-date {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.admin-customer-history-date strong,
+.admin-customer-history-row h3 {
+  margin: 0;
+  color: #f1f1f1;
+  font-size: 0.82rem;
+}
+
+.admin-customer-history-date span,
+.admin-customer-history-row p {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  font-size: 0.67rem;
 }
 
 .admin-register-totals {
@@ -4401,6 +4550,10 @@ body:has(.pos-page) {
 
   .admin-customer-card {
     grid-template-columns: 1fr;
+  }
+
+  .admin-customer-history-stats {
+    grid-template-columns: 1fr 1fr;
   }
 
   .admin-appointment-fields {
@@ -4870,6 +5023,20 @@ body:has(.pos-page) {
   .portal-section-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .admin-customer-detail-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-customer-history-row {
+    grid-template-columns: 1fr auto;
+    gap: 10px 16px;
+  }
+
+  .admin-customer-history-date {
+    grid-column: 1 / -1;
   }
 
   .portal-form-grid,

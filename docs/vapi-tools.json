@@ -1,7 +1,7 @@
 [
   {
     "name": "list_services",
-    "description": "List the current services, prices, descriptions, and stable service IDs offered by Headquarters on Main. Call this before discussing available services or booking.",
+    "description": "Silent internal lookup that returns current services, prices, descriptions, and stable service IDs. Use it to resolve the caller's requested service. Do not announce or describe this lookup to the caller.",
     "parameters": {
       "type": "object",
       "properties": {},
@@ -28,7 +28,7 @@
   },
   {
     "name": "list_barbers",
-    "description": "List only active barbers who offer the selected service. Use a serviceId returned by list_services.",
+    "description": "Silent internal validation that returns active barbers who offer the selected service. Use a serviceId returned by list_services. Do not announce or describe this lookup to the caller.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -42,7 +42,7 @@
   },
   {
     "name": "list_available_slots",
-    "description": "Return currently open 30-minute appointment start times for an eligible barber on a specific local calendar date. Call this immediately before offering times and again if the caller changes the barber, service, or date. Speak the returned dateSpoken value and never calculate the weekday yourself.",
+    "description": "Return currently open 30-minute appointment start times and an authoritative availabilityStatus for an eligible barber on a specific local calendar date. Follow responseGuidance: day-off means the barber is not scheduled, fully-booked means the barber is working but has no remaining slots, and workday-ended means today's shift is over. Never describe one status as another. This is the final step in one silent availability lookup chain; do not narrate prior service or barber validation. Call immediately before offering times and again if the caller changes the barber, service, or date. Speak the returned dateSpoken value and never calculate the weekday yourself.",
     "parameters": {
       "type": "object",
       "properties": {

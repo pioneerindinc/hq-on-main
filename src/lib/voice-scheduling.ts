@@ -202,15 +202,17 @@ async function listShopOpenings(input: { date: string; barberName?: string }) {
 
   const availability = await Promise.all(
     barbers.map(async (barber) => {
-      const slots = await availableSlots(barber._id, barber.name, input.date);
+      const details = await barberAvailability(barber._id, barber.name, input.date);
       return {
         barberId: barber._id.toString(),
         barber: barber.name,
-        slots: slots.map((value) => ({ value, spoken: displayTime(value) })),
+        availabilityStatus: details.status,
+        slots: details.slots.map((value) => ({ value, spoken: displayTime(value) })),
       };
     }),
   );
   const openings = availability.filter((barber) => barber.slots.length > 0);
+  const requestedBarberAvailability = requestedName ? availability[0] ?? null : null;
 
   return {
     date: input.date,
@@ -220,14 +222,21 @@ async function listShopOpenings(input: { date: string; barberName?: string }) {
     shopTodaySpoken: spokenDate(shopToday),
     timeZone: TIME_ZONE,
     requestedBarber: input.barberName || null,
+    requestedBarberStatus: requestedBarberAvailability?.availabilityStatus ?? null,
     hasOpenings: openings.length > 0,
     openings,
     nextCalendarDate,
     nextCalendarDateSpoken: spokenDate(nextCalendarDate),
     nextCalendarDateRelativeToShopToday: relativeToShopToday(nextCalendarDate, shopToday),
-    dateGuidance: openings.length > 0
-      ? `Offer only times returned for ${spokenDate(input.date)}.`
-      : `There are no openings on ${spokenDate(input.date)}. To continue, call list_shop_openings for ${nextCalendarDate}, which is ${spokenDate(nextCalendarDate)} and is ${relativeToShopToday(nextCalendarDate, shopToday)} relative to the shop's current date.`,
+    dateGuidance: requestedBarberAvailability?.availabilityStatus === "day-off"
+      ? `${requestedBarberAvailability.barber} is off on ${spokenDate(input.date)}. Say that the barber is off, not booked. Offer to check another day or another barber on the requested day.`
+      : requestedBarberAvailability?.availabilityStatus === "fully-booked"
+        ? `${requestedBarberAvailability.barber} is scheduled to work on ${spokenDate(input.date)}, but every remaining appointment time is booked. Say that the barber is all booked up, not off. Offer another day or another barber on the requested day.`
+        : requestedBarberAvailability?.availabilityStatus === "workday-ended"
+          ? `${requestedBarberAvailability.barber} was scheduled on ${spokenDate(input.date)}, but the workday has ended. Do not say the barber is off or fully booked. Offer another day or another barber.`
+          : openings.length > 0
+            ? `Offer only times returned for ${spokenDate(input.date)}.`
+            : `There are no openings on ${spokenDate(input.date)}. To continue, call list_shop_openings for ${nextCalendarDate}, which is ${spokenDate(nextCalendarDate)} and is ${relativeToShopToday(nextCalendarDate, shopToday)} relative to the shop's current date.`,
   };
 }
 
@@ -264,16 +273,26 @@ async function listAvailableSlots(input: {
 }) {
   const { service, barber } = await eligibleBarber(input.serviceId, input.barberId);
   validateBookableDate(input.date);
-  const slots = await availableSlots(barber._id, barber.name, input.date);
+  const availability = await barberAvailability(barber._id, barber.name, input.date);
+  const dateRelative = relativeToShopToday(input.date);
 
   return {
     service: service.name,
     barber: barber.name,
     date: input.date,
     dateSpoken: spokenDate(input.date),
-    relativeToShopToday: relativeToShopToday(input.date),
+    relativeToShopToday: dateRelative,
     timeZone: TIME_ZONE,
-    slots: slots.map((value) => ({ value, spoken: displayTime(value) })),
+    availabilityStatus: availability.status,
+    workingHours: availability.workingHours,
+    slots: availability.slots.map((value) => ({ value, spoken: displayTime(value) })),
+    responseGuidance: availability.status === "day-off"
+      ? `${barber.name} is off ${dateRelative}. Say: "It looks like ${barber.name} is off ${dateRelative}. Would you like me to check another day, or see if another barber has anything open ${dateRelative}?" Do not say all booked up.`
+      : availability.status === "fully-booked"
+        ? `${barber.name} is working ${dateRelative}, but every remaining appointment time is booked. Say: "It looks like ${barber.name} is all booked up ${dateRelative}. Would you like me to check another day, or see if another barber has anything open ${dateRelative}?" Do not say the barber is off.`
+        : availability.status === "workday-ended"
+          ? `${barber.name}'s scheduled workday has already ended. Say that the barber is done for the day, not off or fully booked, and offer another day or another barber.`
+          : `Offer one or two of the returned times naturally.`,
   };
 }
 
@@ -390,6 +409,12 @@ async function eligibleBarber(serviceId: string, barberId: string) {
 }
 
 async function availableSlots(barberId: ObjectId, barberName: string, date: string) {
+  return (await barberAvailability(barberId, barberName, date)).slots;
+}
+
+type BarberAvailabilityStatus = "available" | "day-off" | "fully-booked" | "workday-ended";
+
+async function barberAvailability(barberId: ObjectId, barberName: string, date: string) {
   const client = await getMongoClient();
   const db = client.db(DATABASE_NAME);
   const dayOfWeek = dayNumber(date);
@@ -398,7 +423,31 @@ async function availableSlots(barberId: ObjectId, barberName: string, date: stri
     dayOfWeek,
   });
   const hours = customHours ?? defaultHours(dayOfWeek);
-  if (!hours.enabled) return [];
+  if (!hours.enabled) {
+    return {
+      status: "day-off" as BarberAvailabilityStatus,
+      slots: [] as string[],
+      workingHours: null,
+    };
+  }
+
+  const workingHours = {
+    start: String(hours.start),
+    startSpoken: displayTime(String(hours.start)),
+    end: String(hours.end),
+    endSpoken: displayTime(String(hours.end)),
+  };
+  const current = currentLocalDateTime();
+  const remainingScheduleSlots = generateHalfHourSlots(String(hours.start), String(hours.end))
+    .filter((time) => !isSlotDuringBreak(time, hours))
+    .filter((time) => date !== current.date || time > current.time);
+  if (remainingScheduleSlots.length === 0) {
+    return {
+      status: "workday-ended" as BarberAvailabilityStatus,
+      slots: [] as string[],
+      workingHours,
+    };
+  }
 
   const appointments = await db
     .collection("appointments")
@@ -412,14 +461,12 @@ async function availableSlots(barberId: ObjectId, barberName: string, date: stri
   const occupied = new Set(
     appointments.map((appointment) => normalizeTime(String(appointment.requestedTime ?? ""))),
   );
-  const current = currentLocalDateTime();
-
-  return generateHalfHourSlots(String(hours.start), String(hours.end)).filter((time) => {
-    if (occupied.has(time)) return false;
-    if (isSlotDuringBreak(time, hours)) return false;
-    if (date !== current.date) return true;
-    return time > current.time;
-  });
+  const slots = remainingScheduleSlots.filter((time) => !occupied.has(time));
+  return {
+    status: (slots.length > 0 ? "available" : "fully-booked") as BarberAvailabilityStatus,
+    slots,
+    workingHours,
+  };
 }
 
 function validateBookableDate(date: string) {

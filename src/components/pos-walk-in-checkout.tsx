@@ -44,7 +44,7 @@ export function PosWalkInCheckout({ services }: { services: WalkInService[] }) {
             }
           }}
         >
-          <label>Guest name<input name="name" minLength={2} placeholder="Walk-in guest" required /></label>
+          <label>Guest name<input name="name" minLength={2} defaultValue="Walk-In" required /></label>
           <label>Phone <small>Optional</small><input name="phone" type="tel" placeholder="Phone number" /></label>
           <label>Service
             <select name="serviceId" value={serviceId} onChange={(event) => setServiceId(event.target.value)} required>
