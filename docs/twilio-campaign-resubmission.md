@@ -19,7 +19,7 @@ HQ on Main sends transactional SMS appointment confirmations and reminders to cu
 
 Customers may opt in online at https://www.headquartersonmain.com/book after entering their mobile number by voluntarily selecting an unchecked checkbox that states: "Text me appointment confirmation and reminder messages from HQ on Main (up to 2 messages per appointment). Message and data rates may apply. Reply STOP to unsubscribe or HELP for help." Direct links to the Terms of Service and Privacy Policy appear next to the checkbox. Consent is optional, is not required to book, and the booking can be completed with the box unchecked.
 
-For telephone or staff-assisted bookings, the agent reads: "Would you like to receive appointment confirmation and reminder texts from HQ on Main? You may receive up to two messages per appointment. Message and data rates may apply. Reply STOP to unsubscribe or HELP for help. Consent is optional and is not required to book an appointment." SMS consent is recorded only after the customer clearly answers yes. HQ on Main stores the consent choice, timestamp, and source with the appointment. Consent is not obtained from purchased or shared lists.
+For telephone or staff-assisted bookings, the agent reads: "Would you like to receive appointment confirmation and reminder texts from HQ on Main? You may receive up to two messages per appointment. Message and data rates may apply. Consent is not required to book an appointment." SMS consent is recorded only after the customer clearly answers yes. HQ on Main stores the consent choice, timestamp, and source with the appointment. Consent is not obtained from purchased or shared lists.
 
 ## Sample messages
 

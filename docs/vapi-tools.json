@@ -1,7 +1,7 @@
 [
   {
     "name": "list_services",
-    "description": "Silent internal lookup that returns current services, prices, descriptions, and stable service IDs. Use it to resolve the caller's requested service. Do not announce or describe this lookup to the caller.",
+    "description": "Silent internal lookup that returns current services, prices, descriptions, stable service IDs, and the shop's general hours and last appointment start times. Use it to resolve the caller's requested service or answer a shop-hours question. Do not announce or describe this lookup to the caller.",
     "parameters": {
       "type": "object",
       "properties": {},
@@ -10,7 +10,7 @@
   },
   {
     "name": "list_shop_openings",
-    "description": "Check booked appointments and working hours to find openings on a requested local date, either across all active barbers or for a caller's preferred barber. Use before requiring a service when a caller wants to schedule and is choosing a barber, day, or time. Pass today or tomorrow exactly when the caller uses a relative date so the server resolves it in the shop's timezone; never convert a caller's relative date to a year yourself. The response's dateSpoken and relativeToShopToday fields are authoritative; never calculate a weekday or relative-day name yourself. A date interpretation error is not an availability result: retry using the caller's original relative word. If there are no openings, follow dateGuidance and check nextCalendarDate before offering it. Omit date to check today and omit barberName when anyone is acceptable.",
+    "description": "Check booked appointments, shop hours, and barber working hours to find openings on a requested local date, either across all active barbers or for a caller's preferred barber. The response includes the shop's general hours and last appointment start times. Use before requiring a service when a caller wants to schedule and is choosing a barber, day, or time. Pass today or tomorrow exactly when the caller uses a relative date so the server resolves it in the shop's timezone; never convert a caller's relative date to a year yourself. The response's dateSpoken and relativeToShopToday fields are authoritative; never calculate a weekday or relative-day name yourself. A date interpretation error is not an availability result: retry using the caller's original relative word. If there are no openings, follow dateGuidance and check nextCalendarDate before offering it. Omit date to check today and omit barberName when anyone is acceptable.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -42,7 +42,7 @@
   },
   {
     "name": "list_available_slots",
-    "description": "Return currently open 30-minute appointment start times and an authoritative availabilityStatus for an eligible barber on a specific local calendar date. Follow responseGuidance: day-off means the barber is not scheduled, fully-booked means the barber is working but has no remaining slots, and workday-ended means today's shift is over. Never describe one status as another. This is the final step in one silent availability lookup chain; do not narrate prior service or barber validation. Call immediately before offering times and again if the caller changes the barber, service, or date. Speak the returned dateSpoken value and never calculate the weekday yourself.",
+    "description": "Return currently open 30-minute appointment start times, the shop's general hours and last appointment start times, and an authoritative availabilityStatus for an eligible barber on a specific local calendar date. Follow responseGuidance: day-off means the barber is not scheduled, fully-booked means the barber is working but has no remaining slots, and workday-ended means today's shift is over. Never describe one status as another. This is the final step in one silent availability lookup chain; do not narrate prior service or barber validation. Call immediately before offering times and again if the caller changes the barber, service, or date. Speak the returned dateSpoken value and never calculate the weekday yourself.",
     "parameters": {
       "type": "object",
       "properties": {

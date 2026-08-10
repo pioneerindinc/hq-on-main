@@ -18,6 +18,19 @@ import { sendAppointmentConfirmation, sendBarberNewAppointment } from "@/lib/twi
 
 const DATABASE_NAME = "hqonmain";
 const TIME_ZONE = process.env.BARBERSHOP_TIME_ZONE || "America/Indiana/Indianapolis";
+const SHOP_HOURS = {
+  mondayThroughFriday: {
+    open: "8:30 AM",
+    close: "6:30 PM",
+    lastAppointmentStart: "6:00 PM",
+  },
+  saturday: {
+    open: "8:30 AM",
+    close: "2:00 PM",
+    lastAppointmentStart: "1:30 PM",
+  },
+  sunday: { closed: true },
+};
 
 export type VoiceToolCall = {
   id: string;
@@ -128,44 +141,93 @@ export async function runVoiceTool(
 
 export async function recordVoiceEvent(message: Record<string, unknown>) {
   const call = objectValue(message.call);
-  const artifact = objectValue(message.artifact);
+  const artifact = objectValue(Object.keys(objectValue(message.artifact)).length ? message.artifact : call.artifact);
+  const analysis = objectValue(Object.keys(objectValue(message.analysis)).length ? message.analysis : call.analysis);
+  const compliance = objectValue(Object.keys(objectValue(message.compliance)).length ? message.compliance : call.compliance);
+  const recordingConsent = objectValue(compliance.recordingConsent);
+  const recording = objectValue(artifact.recording);
+  const monoRecording = objectValue(recording.mono);
   const type = stringValue(message.type) || "unknown";
   const callId = stringValue(call.id);
   if (!callId) return;
 
   const client = await getMongoClient();
   const now = new Date();
+  const startedAt = dateValue(message.startedAt) ?? dateValue(call.startedAt);
+  const endedAt = dateValue(message.endedAt) ?? dateValue(call.endedAt);
+  const status = stringValue(message.status) || stringValue(call.status) || undefined;
+  const endedReason = stringValue(message.endedReason) || stringValue(call.endedReason) || undefined;
+  const cost = numberValue(message.cost) ?? numberValue(call.cost);
+  const toolCalls = Array.isArray(message.toolCallList)
+    ? message.toolCallList
+    : Array.isArray(message.toolCalls)
+      ? message.toolCalls
+      : [];
+  const toolNames = toolCalls
+    .map((entry) => stringValue(objectValue(objectValue(entry).function).name))
+    .filter(Boolean)
+    .slice(0, 20);
   const update: Record<string, unknown> = {
     callId,
     eventType: type,
-    status: stringValue(message.status) || undefined,
-    endedReason: stringValue(message.endedReason) || undefined,
+    status,
+    endedReason,
     customerNumber: customerNumber(call),
+    callType: stringValue(call.type) || undefined,
+    startedAt,
+    endedAt,
+    cost,
+    durationSeconds: startedAt && endedAt
+      ? Math.max(0, Math.round((endedAt.valueOf() - startedAt.valueOf()) / 1000))
+      : undefined,
     updatedAt: now,
   };
 
   if (type === "end-of-call-report") {
-    update.endedAt = now;
+    update.endedAt = endedAt ?? now;
+    update.summary = stringValue(analysis.summary).slice(0, 10_000) || undefined;
+    update.successEvaluation = stringValue(analysis.successEvaluation).slice(0, 2_000) || undefined;
+    update.structuredData = boundedJsonValue(analysis.structuredData, 20_000);
+    update.recordingUrl = firstString(
+      recording.stereoUrl,
+      monoRecording.combinedUrl,
+      artifact.recordingUrl,
+      message.recordingUrl,
+    );
+    update.logUrl = firstString(artifact.logUrl);
+    update.recordingConsentType = stringValue(recordingConsent.type) || undefined;
+    update.recordingConsentGranted = Boolean(dateValue(recordingConsent.grantedAt));
     if (process.env.VAPI_STORE_TRANSCRIPTS === "true") {
       update.transcript = stringValue(artifact.transcript).slice(0, 50_000);
     }
   }
 
-  await client
-    .db(DATABASE_NAME)
-    .collection("voiceCalls")
-    .updateOne(
+  const event = withoutUndefined({
+    type,
+    status,
+    endedReason,
+    toolNames: toolNames.length ? toolNames : undefined,
+    occurredAt: dateValue(message.timestamp),
+    receivedAt: now,
+  });
+
+  const db = client.db(DATABASE_NAME);
+  await Promise.all([
+    db.collection("voiceCalls").updateOne(
       { callId },
       {
         $set: withoutUndefined(update),
         $setOnInsert: { createdAt: now },
       },
       { upsert: true },
-    );
+    ),
+    db.collection("voiceCallEvents").insertOne({ callId, ...event }),
+  ]);
 }
 
 function listServices() {
   return {
+    shopHours: SHOP_HOURS,
     services: SERVICE_CATALOG.map(({ id, name, price, description }) => ({
       id,
       name,
@@ -221,6 +283,7 @@ async function listShopOpenings(input: { date: string; barberName?: string }) {
     shopToday,
     shopTodaySpoken: spokenDate(shopToday),
     timeZone: TIME_ZONE,
+    shopHours: SHOP_HOURS,
     requestedBarber: input.barberName || null,
     requestedBarberStatus: requestedBarberAvailability?.availabilityStatus ?? null,
     hasOpenings: openings.length > 0,
@@ -283,6 +346,7 @@ async function listAvailableSlots(input: {
     dateSpoken: spokenDate(input.date),
     relativeToShopToday: dateRelative,
     timeZone: TIME_ZONE,
+    shopHours: SHOP_HOURS,
     availabilityStatus: availability.status,
     workingHours: availability.workingHours,
     slots: availability.slots.map((value) => ({ value, spoken: displayTime(value) })),
@@ -422,8 +486,12 @@ async function barberAvailability(barberId: ObjectId, barberName: string, date: 
     barberId,
     dayOfWeek,
   });
-  const hours = customHours ?? defaultHours(dayOfWeek);
-  if (!hours.enabled) {
+  const shopHours = defaultHours(dayOfWeek);
+  const barberHours = customHours ?? shopHours;
+  const start = laterTime(String(barberHours.start), String(shopHours.start));
+  const end = earlierTime(String(barberHours.end), String(shopHours.end));
+  const hours = { ...barberHours, start, end };
+  if (!shopHours.enabled || !barberHours.enabled || !start || !end || start >= end) {
     return {
       status: "day-off" as BarberAvailabilityStatus,
       slots: [] as string[],
@@ -467,6 +535,20 @@ async function barberAvailability(barberId: ObjectId, barberName: string, date: 
     slots,
     workingHours,
   };
+}
+
+function laterTime(left: string, right: string) {
+  const normalizedLeft = normalizeTime(left);
+  const normalizedRight = normalizeTime(right);
+  if (!normalizedLeft || !normalizedRight) return "";
+  return normalizedLeft > normalizedRight ? normalizedLeft : normalizedRight;
+}
+
+function earlierTime(left: string, right: string) {
+  const normalizedLeft = normalizeTime(left);
+  const normalizedRight = normalizeTime(right);
+  if (!normalizedLeft || !normalizedRight) return "";
+  return normalizedLeft < normalizedRight ? normalizedLeft : normalizedRight;
 }
 
 function validateBookableDate(date: string) {
@@ -602,6 +684,36 @@ function objectValue(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function numberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function dateValue(value: unknown) {
+  if (value instanceof Date && !Number.isNaN(value.valueOf())) return value;
+  if (typeof value !== "string") return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.valueOf()) ? undefined : parsed;
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    const text = stringValue(value).trim();
+    if (text) return text;
+  }
+  return undefined;
+}
+
+function boundedJsonValue(value: unknown, maxLength: number) {
+  if (!value || typeof value !== "object") return undefined;
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized.length <= maxLength) return JSON.parse(serialized) as unknown;
+    return { truncated: true, preview: serialized.slice(0, maxLength) };
+  } catch {
+    return undefined;
+  }
 }
 
 function customerNumber(call: Record<string, unknown>) {

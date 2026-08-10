@@ -41,8 +41,7 @@ The key behavior is:
 Caller: "Can I get an appointment with Brayden today?"
 Assistant: "Sure—what are we doing for you today?"
 Caller: "Just a haircut."
-Assistant: "Okay, one sec."
-[Resolve the service, validate Brayden, and check live slots silently.]
+[Resolve the service, validate Brayden, and check live slots without speaking.]
 Assistant: "Brayden has 2:30 or 4:00 open today. Does either one work?"
 ```
 
@@ -73,6 +72,9 @@ like one action.
 Also set the assistant-level server URL to the same endpoint with the same
 credential. Enable at least `status-update` and `end-of-call-report` server
 messages if you want call lifecycle records in the `voiceCalls` collection.
+The app stores the normalized post-call summary in `voiceCalls` and the
+chronological webhook timeline in `voiceCallEvents`. Admins can review both in
+**Admin Dashboard → Booking calls**.
 Transcripts are stored only when `VAPI_STORE_TRANSCRIPTS=true`.
 
 ## 3. Connect the Twilio number

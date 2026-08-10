@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Bebas_Neue, Inter } from "next/font/google";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
+import { VoiceBookingAssistant } from "@/components/voice-booking-assistant";
 import "./globals.css";
 
 const display = Bebas_Neue({
@@ -30,6 +31,7 @@ export default function RootLayout({
         <Header />
         {children}
         <Footer />
+        <VoiceBookingAssistant />
       </body>
     </html>
   );

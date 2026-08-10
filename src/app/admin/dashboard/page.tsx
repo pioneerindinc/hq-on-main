@@ -35,6 +35,7 @@ const adminTabs = [
   { id: "add-appointment", label: "Add appointment", description: "Create a booking" },
   { id: "appointments", label: "Appointments", description: "View and edit bookings" },
   { id: "customers", label: "Customers", description: "Registered accounts" },
+  { id: "calls", label: "Booking calls", description: "Events and outcomes" },
   { id: "register", label: "Daily register", description: "Cash and commissions" },
   { id: "performance", label: "Performance", description: "Barber totals and visits" },  
 ] as const;
@@ -52,24 +53,116 @@ type PerformancePayoutRecord = PerformancePayout & {
   barberName?: string;
 };
 
+type VoiceCallEventRecord = {
+  callId: string;
+  type?: string;
+  status?: string;
+  endedReason?: string;
+  toolNames?: string[];
+  occurredAt?: Date;
+  receivedAt?: Date;
+};
+
+type VoiceCallRecord = {
+  _id: ObjectId;
+  callId: string;
+  callType?: string;
+  eventType?: string;
+  status?: string;
+  endedReason?: string;
+  customerNumber?: string;
+  startedAt?: Date;
+  endedAt?: Date;
+  durationSeconds?: number;
+  cost?: number;
+  summary?: string;
+  successEvaluation?: string;
+  structuredData?: unknown;
+  transcript?: string;
+  recordingUrl?: string;
+  logUrl?: string;
+  recordingConsentType?: string;
+  recordingConsentGranted?: boolean;
+  events?: Omit<VoiceCallEventRecord, "callId">[];
+  createdAt?: Date;
+  updatedAt?: Date;
+};
+
 function isAdminTab(value?: string): value is AdminTab {
   return adminTabs.some((tab) => tab.id === value);
+}
+
+const callDateTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: process.env.BARBERSHOP_TIME_ZONE || "America/Indiana/Indianapolis",
+  month: "2-digit",
+  day: "2-digit",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+function formatCallDateTime(value?: Date | string) {
+  if (!value) return "Not available";
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.valueOf()) ? "Not available" : callDateTimeFormatter.format(date);
+}
+
+function formatCallDuration(seconds?: number) {
+  if (typeof seconds !== "number") return "Not available";
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.max(0, Math.round(seconds % 60));
+  return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
+}
+
+function formatCallCost(cost?: number) {
+  return typeof cost === "number" ? `$${cost.toFixed(2)}` : "Not available";
+}
+
+function formatCallerNumber(phone?: string) {
+  if (!phone) return "Web visitor";
+  const digits = phone.replace(/\D/g, "");
+  const local = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  return local.length === 10
+    ? `(${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`
+    : phone;
+}
+
+function callTypeLabel(type?: string) {
+  if (type === "webCall") return "Website microphone";
+  if (type === "inboundPhoneCall") return "Inbound phone";
+  if (type === "outboundPhoneCall") return "Outbound phone";
+  return "Voice call";
+}
+
+function readableEvent(value?: string) {
+  if (!value) return "Unknown";
+  return value.replace(/[._-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function safeCallUrl(value?: string) {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export default async function AdminDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; tab?: string; customer?: string }>;
+  searchParams: Promise<{ error?: string; tab?: string; customer?: string; call?: string }>;
 }) {
   const admin = await requireStaffRole("admin");
-  const { error, tab, customer: selectedCustomerId } = await searchParams;
+  const { error, tab, customer: selectedCustomerId, call: selectedCallId } = await searchParams;
   const staff = await getStaffCollection();
   const customersCollection = await getCustomerCollection();
   const client = await getMongoClient();
   const db = client.db("hqonmain");
   const businessDate = currentShopDateTime().date;
   const performanceStart = performanceRangeStart(businessDate);
-  const [barbers, customers, appointments, appointmentCount, registerSales, registerPayouts, performanceSales, performancePayouts] = await Promise.all([
+  const [barbers, customers, appointments, appointmentCount, registerSales, registerPayouts, performanceSales, performancePayouts, voiceCalls, voiceCallCount, voiceInProgressCount, voiceBookedAppointmentCount] = await Promise.all([
     staff.find({ role: "barber" }).sort({ active: -1, name: 1 }).toArray(),
     customersCollection.find({}).sort({ createdAt: -1 }).limit(250).toArray(),
     db.collection("appointments")
@@ -94,6 +187,10 @@ export default async function AdminDashboard({
     db.collection<PerformancePayoutRecord>("commissionPayouts").find({
       businessDate: { $gte: performanceStart, $lte: businessDate },
     }).toArray(),
+    db.collection<VoiceCallRecord>("voiceCalls").find({}).sort({ updatedAt: -1 }).limit(150).toArray(),
+    db.collection("voiceCalls").countDocuments(),
+    db.collection("voiceCalls").countDocuments({ status: "in-progress" }),
+    db.collection("appointments").countDocuments({ source: "voice" }),
   ]);
   const appointmentCounts = await Promise.all(
     customers.map((customer) =>
@@ -109,6 +206,19 @@ export default async function AdminDashboard({
     ? await db.collection("appointments").find({
         $or: [{ customerId: selectedCustomer._id }, { email: selectedCustomer.email }],
       }).sort({ requestedDate: -1, requestedTime: -1 }).toArray()
+    : [];
+  const selectedCall = selectedCallId && selectedCallId.length <= 200
+    ? await db.collection<VoiceCallRecord>("voiceCalls").findOne({ callId: selectedCallId })
+    : null;
+  const selectedCallAppointments = selectedCall
+    ? await db.collection("appointments").find({ voiceCallId: selectedCall.callId }).sort({ createdAt: -1 }).toArray()
+    : [];
+  const storedCallEvents = selectedCall
+    ? await db.collection<VoiceCallEventRecord>("voiceCallEvents")
+        .find({ callId: selectedCall.callId })
+        .sort({ occurredAt: 1, receivedAt: 1 })
+        .limit(200)
+        .toArray()
     : [];
   const customerHistoryTotals = selectedCustomerAppointments.reduce(
     (totals, appointment) => {
@@ -163,6 +273,21 @@ export default async function AdminDashboard({
     }),
     { count: 0, gross: 0, commission: 0, paid: 0, due: 0, shop: 0 },
   );
+  const voiceAppointmentByCall = new Map(
+    appointments
+      .filter((appointment) => typeof appointment.voiceCallId === "string")
+      .map((appointment) => [String(appointment.voiceCallId), appointment]),
+  );
+  const selectedCallEvents = [...(storedCallEvents.length ? storedCallEvents : (selectedCall?.events ?? []))].sort((left, right) => {
+    const leftTime = left.occurredAt ?? left.receivedAt;
+    const rightTime = right.occurredAt ?? right.receivedAt;
+    return (leftTime?.valueOf() ?? 0) - (rightTime?.valueOf() ?? 0);
+  });
+  const selectedRecordingUrl = safeCallUrl(selectedCall?.recordingUrl);
+  const selectedLogUrl = safeCallUrl(selectedCall?.logUrl);
+  const selectedStructuredData = selectedCall?.structuredData
+    ? JSON.stringify(selectedCall.structuredData, null, 2)
+    : "";
 
   return (
     <main className="portal-page">
@@ -192,6 +317,7 @@ export default async function AdminDashboard({
                   <div><strong>{item.label}</strong><small>{item.description}</small></div>
                   {item.id === "customers" && customers.length > 0 && <b>{customers.length}</b>}
                   {item.id === "appointments" && appointments.length > 0 && <b>{appointments.length}</b>}
+                  {item.id === "calls" && voiceCallCount > 0 && <b>{voiceCallCount}</b>}
                   {item.id === "register" && registerTotals.count > 0 && <b>{registerTotals.count}</b>}
                 </Link>
               ))}
@@ -468,6 +594,162 @@ export default async function AdminDashboard({
                           </dl>
                         </Link>
                       ))}
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
+
+            {activeTab === "calls" && (
+              <section className="portal-section">
+                {selectedCall ? (
+                  <div className="admin-call-detail">
+                    <Link className="admin-customer-back" href="/admin/dashboard?tab=calls">← Back to all calls</Link>
+                    <div className="admin-call-detail-heading">
+                      <div>
+                        <p className="eyebrow">{callTypeLabel(selectedCall.callType)}</p>
+                        <h2>{formatCallerNumber(selectedCall.customerNumber)}</h2>
+                        <p>{formatCallDateTime(selectedCall.startedAt ?? selectedCall.createdAt)} · Call {selectedCall.callId.slice(-8)}</p>
+                      </div>
+                      <span className={`admin-call-status ${selectedCall.status === "in-progress" ? "live" : ""}`}>
+                        {readableEvent(selectedCall.status || selectedCall.eventType)}
+                      </span>
+                    </div>
+
+                    <div className="admin-call-metrics">
+                      <div><small>Duration</small><strong>{formatCallDuration(selectedCall.durationSeconds)}</strong></div>
+                      <div><small>Call cost</small><strong>{formatCallCost(selectedCall.cost)}</strong></div>
+                      <div><small>End reason</small><strong>{readableEvent(selectedCall.endedReason)}</strong></div>
+                      <div><small>Appointment</small><strong>{selectedCallAppointments.length ? "Booked" : "None linked"}</strong></div>
+                    </div>
+
+                    <div className="admin-call-detail-grid">
+                      <article className="admin-call-panel admin-call-summary">
+                        <header><h3>Post-call summary</h3><span>{selectedCall.eventType === "end-of-call-report" ? "Report received" : "Awaiting report"}</span></header>
+                        <p>{selectedCall.summary || "No post-call summary has been received for this call."}</p>
+                        {selectedCall.successEvaluation && (
+                          <div className="admin-call-evaluation">
+                            <small>Success evaluation</small>
+                            <strong>{selectedCall.successEvaluation}</strong>
+                          </div>
+                        )}
+                        {(selectedRecordingUrl || selectedLogUrl) && (
+                          <div className="admin-call-resource-links">
+                            {selectedRecordingUrl && <a href={selectedRecordingUrl} target="_blank" rel="noreferrer">Open recording ↗</a>}
+                            {selectedLogUrl && <a href={selectedLogUrl} target="_blank" rel="noreferrer">Open Vapi log ↗</a>}
+                          </div>
+                        )}
+                      </article>
+
+                      <article className="admin-call-panel">
+                        <header><h3>Call information</h3></header>
+                        <dl className="admin-call-info">
+                          <div><dt>Channel</dt><dd>{callTypeLabel(selectedCall.callType)}</dd></div>
+                          <div><dt>Caller</dt><dd>{formatCallerNumber(selectedCall.customerNumber)}</dd></div>
+                          <div><dt>Started</dt><dd>{formatCallDateTime(selectedCall.startedAt)}</dd></div>
+                          <div><dt>Ended</dt><dd>{formatCallDateTime(selectedCall.endedAt)}</dd></div>
+                          <div><dt>Recording consent</dt><dd>{selectedCall.recordingConsentType ? `${readableEvent(selectedCall.recordingConsentType)} · ${selectedCall.recordingConsentGranted ? "Granted" : "Not granted"}` : "Not reported"}</dd></div>
+                          <div><dt>Vapi call ID</dt><dd className="admin-call-id">{selectedCall.callId}</dd></div>
+                        </dl>
+                      </article>
+                    </div>
+
+                    {selectedCallAppointments.length > 0 && (
+                      <article className="admin-call-panel admin-call-bookings">
+                        <header><h3>Appointments booked during this call</h3><span>{selectedCallAppointments.length}</span></header>
+                        {selectedCallAppointments.map((appointment) => (
+                          <div className="admin-call-booking" key={appointment._id.toString()}>
+                            <div><strong>{String(appointment.name ?? "Guest")}</strong><span>{String(appointment.service ?? "Service not specified")}</span></div>
+                            <div><strong>{formatDisplayDate(String(appointment.requestedDate ?? ""))}</strong><span>{displayTime(String(appointment.requestedTime ?? ""))} with {String(appointment.barber ?? "Unassigned")}</span></div>
+                            <span className={`appointment-status ${String(appointment.status ?? "confirmed")}`}>{String(appointment.status ?? "confirmed")}</span>
+                          </div>
+                        ))}
+                      </article>
+                    )}
+
+                    {selectedStructuredData && (
+                      <details className="admin-call-panel admin-call-disclosure">
+                        <summary>Structured post-call data</summary>
+                        <pre>{selectedStructuredData}</pre>
+                      </details>
+                    )}
+
+                    <details className="admin-call-panel admin-call-disclosure" open={Boolean(selectedCall.transcript)}>
+                      <summary>Transcript</summary>
+                      {selectedCall.transcript ? (
+                        <pre className="admin-call-transcript">{selectedCall.transcript}</pre>
+                      ) : (
+                        <p>Transcript storage is off or no transcript was included. Set <code>VAPI_STORE_TRANSCRIPTS=true</code> only after choosing an appropriate retention and privacy policy.</p>
+                      )}
+                    </details>
+
+                    <article className="admin-call-panel admin-call-timeline">
+                      <header><h3>Call events</h3><span>{selectedCallEvents.length}</span></header>
+                      {selectedCallEvents.length === 0 && <p className="portal-empty">No individual events were retained for this older call.</p>}
+                      <ol>
+                        {selectedCallEvents.map((event, index) => (
+                          <li key={`${event.type}-${event.receivedAt?.toString() ?? index}-${index}`}>
+                            <span className={`admin-call-event-dot ${event.status === "in-progress" ? "live" : ""}`} />
+                            <div>
+                              <strong>{readableEvent(event.type)}</strong>
+                              <p>
+                                {event.status && `Status: ${readableEvent(event.status)}`}
+                                {event.endedReason && ` · ${readableEvent(event.endedReason)}`}
+                                {event.toolNames?.length ? ` · ${event.toolNames.map(readableEvent).join(", ")}` : ""}
+                              </p>
+                            </div>
+                            <time>{formatCallDateTime(event.occurredAt ?? event.receivedAt)}</time>
+                          </li>
+                        ))}
+                      </ol>
+                    </article>
+                  </div>
+                ) : (
+                  <>
+                    <div className="portal-section-heading">
+                      <div><h2>Booking calls</h2></div>
+                      <p>Review phone and website assistant activity.</p>
+                    </div>
+                    <div className="admin-call-overview">
+                      <div><small>Total calls</small><strong>{voiceCallCount}</strong></div>
+                      <div><small>In progress</small><strong>{voiceInProgressCount}</strong></div>
+                      <div><small>Voice appointments</small><strong>{voiceBookedAppointmentCount}</strong></div>
+                    </div>
+                    <div className="admin-call-list">
+                      {voiceCalls.length === 0 && (
+                        <div className="portal-empty">
+                          <p>No call events have been received yet.</p>
+                          <small>Vapi must send status-update and end-of-call-report messages to the app webhook.</small>
+                        </div>
+                      )}
+                      {voiceCalls.map((call) => {
+                        const linkedAppointment = voiceAppointmentByCall.get(call.callId);
+                        return (
+                          <Link
+                            className="admin-call-card"
+                            href={`/admin/dashboard?tab=calls&call=${encodeURIComponent(call.callId)}`}
+                            prefetch={false}
+                            key={call._id.toString()}
+                          >
+                            <span className={`admin-call-channel ${call.callType === "webCall" ? "web" : "phone"}`} aria-hidden="true">
+                              {call.callType === "webCall" ? "WEB" : "TEL"}
+                            </span>
+                            <div className="admin-call-card-main">
+                              <h3>{formatCallerNumber(call.customerNumber)}</h3>
+                              <p>{callTypeLabel(call.callType)} · {formatCallDateTime(call.startedAt ?? call.createdAt)}</p>
+                            </div>
+                            <div className="admin-call-card-result">
+                              <strong>{linkedAppointment ? "Appointment booked" : call.summary ? "Post-call report" : readableEvent(call.eventType)}</strong>
+                              <span>{linkedAppointment ? `${String(linkedAppointment.service ?? "Service")} · ${formatDisplayDate(String(linkedAppointment.requestedDate ?? ""))}` : readableEvent(call.endedReason || call.status)}</span>
+                            </div>
+                            <div className="admin-call-card-meta">
+                              <strong>{formatCallDuration(call.durationSeconds)}</strong>
+                              <span>{formatCallCost(call.cost)}</span>
+                            </div>
+                            <span className="admin-call-card-arrow">→</span>
+                          </Link>
+                        );
+                      })}
                     </div>
                   </>
                 )}

@@ -39,9 +39,12 @@ export async function POST(request: Request) {
       typeof message.call?.id === "string"
         ? message.call.id
         : "";
-    const results = await Promise.all(
-      toolCalls.map((toolCall) => runVoiceTool(toolCall, callId)),
-    );
+    const [results] = await Promise.all([
+      Promise.all(toolCalls.map((toolCall) => runVoiceTool(toolCall, callId))),
+      recordVoiceEvent(message).catch((error) => {
+        console.error("Could not record Vapi tool event", error);
+      }),
+    ]);
     return Response.json({ results });
   }
 
