@@ -3,7 +3,6 @@ import Link from "next/link";
 import { ObjectId } from "mongodb";
 import {
   cancelCustomerAppointment,
-  changeCustomerPassword,
   updateCustomerProfile,
 } from "@/app/actions/customer";
 import { CustomerHeader } from "@/components/customer-header";
@@ -19,7 +18,6 @@ export const metadata: Metadata = {
 const tabs = [
   { id: "appointments", label: "Appointments", description: "Upcoming and past visits" },
   { id: "profile", label: "Profile", description: "Contact information" },
-  { id: "security", label: "Security", description: "Password and access" },
 ] as const;
 type Tab = (typeof tabs)[number]["id"];
 
@@ -50,7 +48,7 @@ export default async function CustomerDashboard({
   const appointments = await client
     .db("hqonmain")
     .collection<Appointment>("appointments")
-    .find({ $or: [{ customerId: customer._id }, { email: customer.email }] })
+    .find({ customerId: customer._id })
     .sort({ requestedDate: -1, requestedTime: -1 })
     .limit(100)
     .toArray();
@@ -139,25 +137,14 @@ export default async function CustomerDashboard({
                 <div className="customer-panel-heading"><div><p className="eyebrow">Your details</p><h2>Profile</h2></div></div>
                 <form className="portal-form customer-profile-form" action={updateCustomerProfile}>
                   <label>Full name<input name="name" defaultValue={customer.name} required minLength={2} /></label>
-                  <label>Phone number<input name="phone" type="tel" defaultValue={customer.phone} required /></label>
-                  <label className="wide">Email address<input name="email" type="email" defaultValue={customer.email} required /></label>
+                  <label>Verified mobile<input value={customer.phone} readOnly disabled /></label>
+                  <label className="wide">Email address <small>Optional</small><input name="email" type="email" defaultValue={customer.email ?? ""} /></label>
                   <button className="button button-primary wide" type="submit">Save profile</button>
                 </form>
                 <p className="customer-form-note">Changes also update your active appointments.</p>
               </>
             )}
 
-            {activeTab === "security" && (
-              <>
-                <div className="customer-panel-heading"><div><p className="eyebrow">Account access</p><h2>Change password</h2></div></div>
-                <form className="portal-form customer-security-form" action={changeCustomerPassword}>
-                  <label>Current password<input name="currentPassword" type="password" required autoComplete="current-password" /></label>
-                  <label>New password<input name="newPassword" type="password" required minLength={10} autoComplete="new-password" /></label>
-                  <small>Use at least 10 characters. Changing it will sign you out everywhere.</small>
-                  <button className="button button-primary" type="submit">Update password</button>
-                </form>
-              </>
-            )}
           </section>
         </div>
       </div>

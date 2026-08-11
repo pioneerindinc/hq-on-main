@@ -1,9 +1,10 @@
 import { ObjectId } from "mongodb";
-import { createCustomerSession, getCurrentCustomer, getCustomerCollection } from "@/lib/customer-auth";
-import { hashPassword, getStaffCollection } from "@/lib/auth";
+import { createAppointment } from "@/lib/appointment-service";
+import { getCurrentCustomer } from "@/lib/customer-auth";
+import { getStaffCollection } from "@/lib/auth";
 import { type DailyHours, dayNumber, defaultHours, isSlotWithinHours, normalizeTime } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
-import { serviceById } from "@/lib/services";
+import { getServiceById } from "@/lib/services";
 import { sendAppointmentConfirmation, sendBarberNewAppointment } from "@/lib/twilio-sms";
 
 export async function POST(request: Request) {
@@ -13,7 +14,7 @@ export async function POST(request: Request) {
     const barberId = String(body.barberId ?? "");
     const date = String(body.date ?? "");
     const time = normalizeTime(String(body.time ?? ""));
-    const service = serviceById(serviceId);
+    const service = await getServiceById(serviceId);
 
     if (!service || !ObjectId.isValid(barberId) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !time) {
       return Response.json({ message: "Your booking selections are incomplete." }, { status: 400 });
@@ -58,45 +59,20 @@ export async function POST(request: Request) {
     }
 
     const signedInCustomer = await getCurrentCustomer();
-    const name = signedInCustomer?.name ?? String(body.name ?? "").trim();
-    const email = signedInCustomer?.email ?? String(body.email ?? "").trim().toLowerCase();
-    const phone = signedInCustomer?.phone ?? String(body.phone ?? "").trim();
-
-    if (name.length < 2 || !email.includes("@") || phone.length < 7) {
-      return Response.json({ message: "Enter your name, email, and phone number." }, { status: 400 });
+    if (!signedInCustomer?.phoneVerifiedAt) {
+      return Response.json({ message: "Verify your mobile number to reserve this appointment." }, { status: 401 });
     }
-
-    let customerId = signedInCustomer?._id;
-    if (!signedInCustomer && body.createAccount === true) {
-      const password = String(body.password ?? "");
-      if (password.length < 10) {
-        return Response.json({ message: "Account passwords must be at least 10 characters." }, { status: 400 });
-      }
-      const customers = await getCustomerCollection();
-      if (await customers.findOne({ email })) {
-        return Response.json({ message: "An account already uses this email. Log in instead." }, { status: 409 });
-      }
-      const now = new Date();
-      const result = await customers.insertOne({
-        name,
-        email,
-        phone,
-        passwordHash: await hashPassword(password),
-        createdAt: now,
-        updatedAt: now,
-      });
-      const customer = await customers.findOne({ _id: result.insertedId });
-      if (customer) {
-        customerId = customer._id;
-        await createCustomerSession(customer);
-      }
-    }
+    const name = signedInCustomer.name;
+    const email = signedInCustomer.email ?? "";
+    const phone = signedInCustomer.phone;
 
     const appointment = {
       name,
       email,
       phone,
-      customerId,
+      customerId: signedInCustomer._id,
+      recipientName: name,
+      recipientType: "self",
       service: service.name,
       serviceId: service.id,
       price: service.price,
@@ -106,21 +82,21 @@ export async function POST(request: Request) {
       requestedTime: time,
       status: "confirmed",
       source: "online",
+      bookingSource: "online",
       smsConsent: body.smsConsent === true,
       smsConsentAt: body.smsConsent === true ? new Date() : undefined,
       smsConsentSource: body.smsConsent === true ? "online-booking" : undefined,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    const result = await db.collection("appointments").insertOne(appointment);
-    const savedAppointment = { ...appointment, _id: result.insertedId };
+    const savedAppointment = await createAppointment({ db, appointment, bookingSource: "online", customerId: signedInCustomer._id, recipientName: name });
     const [sms, barberSms] = await Promise.all([
       sendAppointmentConfirmation(savedAppointment),
       sendBarberNewAppointment(savedAppointment),
     ]);
 
     return Response.json({
-      confirmationId: result.insertedId.toString().slice(-8).toUpperCase(),
+      confirmationId: savedAppointment._id.toString().slice(-8).toUpperCase(),
       sms,
       barberSms,
       appointment: {

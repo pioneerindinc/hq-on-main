@@ -20,7 +20,7 @@ function SubmitButton() {
   );
 }
 
-export function PosWalkInCheckout({ services }: { services: WalkInService[] }) {
+export function PosWalkInCheckout({ services, requiresAuditReason = false }: { services: WalkInService[]; requiresAuditReason?: boolean }) {
   const [serviceId, setServiceId] = useState(services[0]?.id ?? "");
   const selectedService = services.find((service) => service.id === serviceId);
   const selectedPrice = priceLabelToCents(selectedService?.price);
@@ -56,6 +56,11 @@ export function PosWalkInCheckout({ services }: { services: WalkInService[] }) {
           <label>Cash total
             <span className="pos-walk-in-amount"><b>$</b><input key={serviceId} name="amount" type="number" min="0.01" max="100000" step="0.01" defaultValue={selectedPrice === null ? "" : (selectedPrice / 100).toFixed(2)} placeholder="Enter total" required /></span>
           </label>
+          {requiresAuditReason && (
+            <label className="pos-walk-in-audit-reason">Post-closeout reason
+              <input name="auditReason" minLength={3} maxLength={300} placeholder="Why is this sale being added after closeout?" required />
+            </label>
+          )}
           <SubmitButton />
         </form>
       ) : (

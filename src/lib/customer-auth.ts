@@ -7,13 +7,36 @@ import { redirect } from "next/navigation";
 import { getMongoClient } from "@/lib/mongodb";
 
 const CUSTOMER_COOKIE = "hq_customer_session";
-const SESSION_LENGTH_MS = 1000 * 60 * 60 * 24 * 30;
+const SESSION_LENGTH_MS = 1000 * 60 * 60 * 24 * 180;
 
 export type CustomerRecord = {
   name: string;
-  email: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
   phone: string;
-  passwordHash: string;
+  normalizedPhone?: string;
+  phoneVerifiedAt?: Date;
+  passwordHash?: string;
+  createdBySource?: "online" | "staff" | "phone" | "walk_in" | "vapi" | "migration";
+  createdByUserId?: ObjectId;
+  status?: "active" | "inactive" | "needs_phone" | "merged";
+  lastVisitAt?: Date;
+  preferredBarberId?: ObjectId;
+  notes?: string;
+  possibleDuplicate?: boolean;
+  duplicateReviewKey?: string;
+  mergedIntoCustomerId?: ObjectId;
+  mergedAt?: Date;
+  mergedByUserId?: ObjectId;
+  dependents?: Array<{
+    id: string;
+    firstName: string;
+    lastName?: string;
+    relationship?: string;
+    active: boolean;
+    createdAt: Date;
+  }>;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -43,7 +66,7 @@ export async function createCustomerSession(customer: Customer) {
   (await cookies()).set(CUSTOMER_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.AUTH_COOKIE_SECURE === "true" || (process.env.AUTH_COOKIE_SECURE !== "false" && process.env.NODE_ENV === "production"),
     path: "/",
     expires: expiresAt,
   });
@@ -85,6 +108,7 @@ export async function getCurrentCustomer(): Promise<SafeCustomer | null> {
     .collection<CustomerRecord>("customers")
     .findOne({ _id: session.customerId });
   if (!customer) return null;
+  if (!customer.phoneVerifiedAt) return null;
   const { passwordHash: _passwordHash, ...safeCustomer } = customer;
   void _passwordHash;
   return safeCustomer;

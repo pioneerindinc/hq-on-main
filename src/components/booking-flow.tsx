@@ -1,14 +1,15 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { displayTime, formatDisplayDate } from "@/lib/booking";
-import { SERVICE_CATALOG, serviceById } from "@/lib/services";
+import type { ServiceCatalogItem } from "@/lib/services";
+import { PhoneAuthFlow, type PhoneCustomer } from "@/components/phone-auth-flow";
 
 type Barber = { id: string; name: string; specialty: string; photoUrl?: string | null };
 type Slot = { value: string; label: string };
-type Customer = { name: string; email: string; phone: string };
+type Customer = PhoneCustomer;
 type Confirmation = {
   confirmationId: string;
   appointment: { service: string; price: string; barber: string; date: string; time: string };
@@ -40,7 +41,7 @@ function localDateValue(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-export function BookingFlow() {
+export function BookingFlow({ services }: { services: ServiceCatalogItem[] }) {
   const [step, setStep] = useState(0);
   const [serviceId, setServiceId] = useState("");
   const [barber, setBarber] = useState<Barber | null>(null);
@@ -51,8 +52,6 @@ export function BookingFlow() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [customer, setCustomer] = useState<Customer | null>(null);
-  const [infoMode, setInfoMode] = useState<"guest" | "login">("guest");
-  const [createAccount, setCreateAccount] = useState(false);
   const [smsConsent, setSmsConsent] = useState(false);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -83,7 +82,7 @@ export function BookingFlow() {
       }),
     ];
   }, [calendarMonth]);
-  const service = serviceById(serviceId);
+  const service = services.find((item) => item.id === serviceId);
 
   useEffect(() => {
     fetch("/api/customer/me")
@@ -143,7 +142,7 @@ export function BookingFlow() {
     setStep(index);
   }
 
-  async function completeBooking(details?: Customer & { password?: string; createAccount?: boolean }) {
+  async function completeBooking() {
     setLoading(true);
     setMessage("");
     try {
@@ -156,7 +155,6 @@ export function BookingFlow() {
           date,
           time,
           smsConsent,
-          ...details,
         }),
       });
       const data = await response.json();
@@ -166,42 +164,6 @@ export function BookingFlow() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to complete your booking.");
     } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleGuest(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    await completeBooking({
-      name: String(data.get("name") ?? ""),
-      email: String(data.get("email") ?? ""),
-      phone: String(data.get("phone") ?? ""),
-      password: String(data.get("password") ?? ""),
-      createAccount,
-    });
-  }
-
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLoading(true);
-    setMessage("");
-    const data = new FormData(event.currentTarget);
-    try {
-      const response = await fetch("/api/customer/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: data.get("email"),
-          password: data.get("password"),
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.message);
-      setCustomer(result.customer);
-      await completeBooking();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to log in.");
       setLoading(false);
     }
   }
@@ -238,7 +200,7 @@ export function BookingFlow() {
               <>
                 <div className="booking-step-title"><div><h2>Select a service</h2><p>What can we do for you?</p></div></div>
                 <div className="booking-service-grid">
-                  {SERVICE_CATALOG.map((item) => (
+                  {services.map((item) => (
                     <button type="button" onClick={() => chooseService(item.id)} key={item.id}>
                       <div><h3>{item.name}</h3><p>{item.description}</p></div>
                       <strong>{item.price}</strong>
@@ -345,44 +307,24 @@ export function BookingFlow() {
 
             {step === 3 && (
               <>
-                <div className="booking-step-title"><div><h2>Your information</h2><p>Continue as a guest or use your saved details.</p></div></div>
+                <div className="booking-step-title"><div><h2>Verify your number</h2><p>Your mobile number securely connects this visit to your history.</p></div></div>
                 {customer ? (
                   <div className="customer-signed-in">
                     <span>{customer.name.slice(0, 1)}</span>
-                    <div><small>Booking as</small><h3>{customer.name}</h3><p>{customer.email} · {customer.phone}</p></div>
+                    <div><small>Booking as</small><h3>{customer.name}</h3><p>{customer.phone}{customer.email ? ` · ${customer.email}` : ""}</p></div>
                     <SmsConsent checked={smsConsent} onChange={setSmsConsent} />
                     <button className="button button-primary" disabled={loading} onClick={() => completeBooking()} type="button">
                       {loading ? "Confirming…" : "Confirm appointment"}
                     </button>
                   </div>
                 ) : (
-                  <>
-                    <div className="info-mode-tabs">
-                      <button className={infoMode === "guest" ? "active" : ""} onClick={() => setInfoMode("guest")} type="button">Continue as guest</button>
-                      <button className={infoMode === "login" ? "active" : ""} onClick={() => setInfoMode("login")} type="button">Customer login</button>
-                    </div>
-                    {infoMode === "guest" ? (
-                      <form className="booking-info-form" onSubmit={handleGuest}>
-                        <label>Full name<input name="name" required autoComplete="name" /></label>
-                        <label>Phone number<input name="phone" type="tel" required autoComplete="tel" /></label>
-                        <label className="wide">Email address<input name="email" type="email" required autoComplete="email" /></label>
-                        <label className="account-check wide">
-                          <input type="checkbox" checked={createAccount} onChange={(event) => setCreateAccount(event.target.checked)} />
-                          <span>Save my information for faster booking next time</span>
-                        </label>
-                        <SmsConsent checked={smsConsent} onChange={setSmsConsent} className="wide" />
-                        {createAccount && <label className="wide">Create a password<input name="password" type="password" minLength={10} required autoComplete="new-password" /><small>At least 10 characters</small></label>}
-                        <button className="button button-primary wide" disabled={loading} type="submit">{loading ? "Confirming…" : "Confirm appointment"}</button>
-                      </form>
-                    ) : (
-                      <form className="booking-info-form" onSubmit={handleLogin}>
-                        <label className="wide">Email address<input name="email" type="email" required autoComplete="email" /></label>
-                        <label className="wide">Password<input name="password" type="password" required autoComplete="current-password" /></label>
-                        <SmsConsent checked={smsConsent} onChange={setSmsConsent} className="wide" />
-                        <button className="button button-primary wide" disabled={loading} type="submit">{loading ? "Logging in…" : "Log in & confirm"}</button>
-                      </form>
-                    )}
-                  </>
+                  <div className="booking-phone-auth">
+                    <SmsConsent checked={smsConsent} onChange={setSmsConsent} />
+                    <PhoneAuthFlow onAuthenticated={async (verifiedCustomer) => {
+                      setCustomer(verifiedCustomer);
+                      await completeBooking();
+                    }} />
+                  </div>
                 )}
               </>
             )}

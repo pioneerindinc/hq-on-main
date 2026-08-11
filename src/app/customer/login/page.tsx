@@ -4,7 +4,7 @@ import { CustomerAuthPanel } from "@/components/customer-auth-panel";
 import { getCurrentCustomer } from "@/lib/customer-auth";
 
 export const metadata: Metadata = {
-  title: "Customer Login | HQ on Main",
+  title: "Continue with Phone | HQ on Main",
   robots: { index: false, follow: false },
 };
 

@@ -29,7 +29,11 @@ export async function login(formData: FormData) {
   }
 
   const staffCollection = await getStaffCollection();
-  const staff = await staffCollection.findOne({ email, role });
+  const staff = await staffCollection.findOne(
+    role === "admin"
+      ? { email, $or: [{ role: "admin" }, { role: "barber", adminAccess: true }] }
+      : { email, role: "barber" },
+  );
 
   if (!staff || !staff.active || !(await verifyPassword(password, staff.passwordHash))) {
     loginError(role, "Email or password is incorrect.");

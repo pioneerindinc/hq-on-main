@@ -15,7 +15,7 @@ export default async function AdminLoginPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const staff = await getCurrentStaff();
-  if (staff?.role === "admin") redirect("/admin/dashboard");
+  if (staff && (staff.role === "admin" || staff.adminAccess === true)) redirect("/admin/dashboard");
   const needsSetup = await adminSetupRequired();
   const { error } = await searchParams;
 

@@ -14,7 +14,11 @@ import {
   normalizeTime,
 } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
-import { SERVICE_CATALOG, SERVICE_IDS, SERVICE_NAMES } from "@/lib/services";
+import { createAppointment, type BookingSource } from "@/lib/appointment-service";
+import { resolveCustomer } from "@/lib/customer-identity";
+import { hasDrawerCloseout, recordPostCloseoutChange, type FinancialAuditChange } from "@/lib/financial-audit";
+import { formatMoney, parseMoneyToCents } from "@/lib/money";
+import { ensureServiceCatalog, getServiceCatalog } from "@/lib/services";
 import {
   sendAppointmentCancellationNotifications,
   sendAppointmentConfirmation,
@@ -138,7 +142,8 @@ export async function saveAvailability(formData: FormData) {
 
 export async function saveBarberServices(formData: FormData) {
   const barber = await requireStaffRole("barber");
-  const services = SERVICE_CATALOG
+  const serviceCatalog = await getServiceCatalog();
+  const services = serviceCatalog
     .filter((service) => formData.get(`service_${service.id}`) === "on")
     .map((service) => service.id);
 
@@ -152,7 +157,7 @@ export async function saveBarberServices(formData: FormData) {
 
 export async function addBarberAppointment(formData: FormData) {
   const barber = await requireStaffRole("barber");
-  const required = ["name", "phone", "email", "service", "date", "time", "visitType"];
+  const required = ["name", "phone", "service", "date", "time", "visitType"];
   if (required.some((field) => !value(formData, field))) {
     dashboardError("barber", "Complete all appointment fields.", "add");
   }
@@ -161,10 +166,11 @@ export async function addBarberAppointment(formData: FormData) {
   if (!["appointment", "walk-in"].includes(visitType)) {
     dashboardError("barber", "Choose appointment or walk-in.", "add");
   }
-  const offeredServiceIds = barber.services ?? [...SERVICE_IDS];
-  const allowedNames = new Set<string>(SERVICE_NAMES);
+  const serviceCatalog = await getServiceCatalog();
+  const offeredServiceIds = barber.services ?? serviceCatalog.map((service) => service.id);
+  const allowedNames = new Set(serviceCatalog.map((service) => service.name));
   const offeredNames = new Set<string>(
-    SERVICE_CATALOG
+    serviceCatalog
       .filter((service) => offeredServiceIds.includes(service.id))
       .map((service) => service.name),
   );
@@ -182,33 +188,48 @@ export async function addBarberAppointment(formData: FormData) {
     time: value(formData, "time"),
     tab: "add",
   });
-  const service = SERVICE_CATALOG.find((item) => item.name === serviceName)!;
+  const service = serviceCatalog.find((item) => item.name === serviceName)!;
+  const bookingSource: BookingSource = visitType === "walk-in" ? "walk_in" : value(formData, "bookingSource") === "phone" ? "phone" : "staff";
+  let customer;
+  try {
+    customer = await resolveCustomer({
+      phone: value(formData, "phone"), name: value(formData, "name"), email: value(formData, "email"),
+      source: bookingSource, createdByUserId: barber._id,
+    });
+  } catch (error) {
+    dashboardError("barber", error instanceof Error ? error.message : "Enter a valid customer phone number.", "add");
+  }
   const now = new Date();
   const appointment = {
     name: value(formData, "name"),
-    phone: value(formData, "phone"),
+    phone: customer.phone,
     email: value(formData, "email").toLowerCase(),
     service: serviceName,
     serviceId: service.id,
     price: service.price,
     barber: barber.name,
     barberId: barber._id,
+    customerId: customer._id,
+    recipientName: value(formData, "name"),
+    recipientType: "self",
     requestedDate: date,
     requestedTime: time,
     status: "confirmed",
     visitType,
     notes: value(formData, "notes"),
     source: visitType === "walk-in" ? "walk-in" : "barber",
+    bookingSource,
+    createdByUserId: barber._id,
     smsConsent: formData.get("smsConsent") === "on",
     smsConsentAt: formData.get("smsConsent") === "on" ? now : undefined,
     smsConsentSource: formData.get("smsConsent") === "on" ? "staff-confirmed" : undefined,
     createdAt: now,
     updatedAt: now,
   };
-  const result = await db.collection("appointments").insertOne(appointment);
+  const savedAppointment = await createAppointment({ db, appointment, bookingSource, customerId: customer._id, recipientName: appointment.name, createdByUserId: barber._id });
   await Promise.all([
-    sendAppointmentConfirmation({ ...appointment, _id: result.insertedId }),
-    sendBarberNewAppointment({ ...appointment, _id: result.insertedId }),
+    sendAppointmentConfirmation(savedAppointment),
+    sendBarberNewAppointment(savedAppointment),
   ]);
 
   revalidatePath("/barber/dashboard");
@@ -254,6 +275,32 @@ export async function updateBarberAppointment(formData: FormData) {
         excludeAppointmentId: new ObjectId(id),
       })
     : normalizedInputTime;
+  const checkoutAmountCents = typeof existing.checkoutAmountCents === "number"
+    ? parseMoneyToCents(value(formData, "checkoutAmount"))
+    : null;
+  if (typeof existing.checkoutAmountCents === "number" && checkoutAmountCents === null) {
+    dashboardError("barber", "Enter a valid cash total for the completed appointment.", "appointments");
+  }
+  const auditChanges: FinancialAuditChange[] = [
+    ...(String(existing.requestedDate ?? "") !== date ? [{ field: "Date", before: String(existing.requestedDate ?? ""), after: date }] : []),
+    ...(String(existing.requestedTime ?? "") !== normalizedTime ? [{ field: "Time", before: String(existing.requestedTime ?? ""), after: normalizedTime }] : []),
+    ...(String(existing.status ?? "") !== status ? [{ field: "Status", before: String(existing.status ?? ""), after: status }] : []),
+    ...(String(existing.visitType ?? "appointment") !== visitType ? [{ field: "Visit type", before: String(existing.visitType ?? "appointment"), after: visitType }] : []),
+    ...(checkoutAmountCents !== null && checkoutAmountCents !== Number(existing.checkoutAmountCents)
+      ? [{ field: "Cash total", before: formatMoney(Number(existing.checkoutAmountCents)), after: formatMoney(checkoutAmountCents) }]
+      : []),
+  ];
+  const closedDates = [...new Set([String(existing.requestedDate ?? ""), date])].filter(
+    (businessDate) => /^\d{4}-\d{2}-\d{2}$/.test(businessDate),
+  );
+  const auditedDates = typeof existing.checkoutAmountCents === "number" && auditChanges.length
+    ? (await Promise.all(closedDates.map(async (businessDate) => ({ businessDate, closed: await hasDrawerCloseout(db, businessDate) })))).filter((item) => item.closed).map((item) => item.businessDate)
+    : [];
+  const auditReason = value(formData, "auditReason");
+  if (auditedDates.length && auditReason.length < 3) {
+    dashboardError("barber", "Enter a reason for changing financial information after drawer closeout.", "appointments");
+  }
+  const commissionPercentage = Math.min(100, Math.max(0, Number(existing.commissionPercentageSnapshot ?? barber.commissionPercentage ?? 0)));
   const result = await db.collection("appointments").updateOne(
       appointmentFilter,
       {
@@ -263,12 +310,30 @@ export async function updateBarberAppointment(formData: FormData) {
           status,
           visitType,
           notes: value(formData, "notes"),
+          ...(checkoutAmountCents !== null ? {
+            checkoutAmountCents,
+            commissionAmountCents: Math.round(checkoutAmountCents * commissionPercentage / 100),
+            shopAmountCents: checkoutAmountCents - Math.round(checkoutAmountCents * commissionPercentage / 100),
+          } : {}),
           updatedAt: new Date(),
         },
       },
     );
 
   if (!result.matchedCount) dashboardError("barber", "Appointment not found.", "appointments");
+  if (status === "completed" && existing.customerId instanceof ObjectId) {
+    await db.collection("customers").updateOne({ _id: existing.customerId }, { $set: { lastVisitAt: new Date(), updatedAt: new Date() } });
+  }
+  await Promise.all(auditedDates.map((businessDate) => recordPostCloseoutChange({
+    db,
+    businessDate,
+    actor: barber,
+    entityType: "appointment",
+    entityId: existing._id,
+    summary: `${barber.name}'s appointment for ${String(existing.name ?? "Guest")} changed after closeout.`,
+    reason: auditReason,
+    changes: auditChanges,
+  })));
   if (existing.status !== "cancelled" && status === "cancelled") {
     await sendAppointmentCancellationNotifications({
       ...existing,
@@ -278,6 +343,7 @@ export async function updateBarberAppointment(formData: FormData) {
     });
   }
   revalidatePath("/barber/dashboard");
+  revalidatePath("/admin/dashboard");
 }
 
 async function assertBarberAppointmentSlot({
@@ -358,6 +424,7 @@ export async function createBarber(formData: FormData) {
   const email = value(formData, "email").toLowerCase();
   const phone = value(formData, "phone");
   const smsNotificationsEnabled = formData.get("smsNotificationsEnabled") === "on";
+  const adminAccess = formData.get("adminAccess") === "on";
   const password = value(formData, "password");
   const posPin = value(formData, "posPin");
   const commissionPercentage = Number(value(formData, "commissionPercentage"));
@@ -368,7 +435,7 @@ export async function createBarber(formData: FormData) {
 
   if (
     name.length < 2 ||
-    !email.includes("@") ||
+    (email.length > 0 && !email.includes("@")) ||
     (phone.length > 0 && !isValidSmsPhone(phone)) ||
     (smsNotificationsEnabled && !isValidSmsPhone(phone)) ||
     password.length < 10 ||
@@ -406,6 +473,7 @@ export async function createBarber(formData: FormData) {
     bio,
     ...(photo ? { hasPhoto: true, photoUpdatedAt: now } : {}),
     role: "barber",
+    adminAccess,
     active: true,
     passwordHash: await hashPassword(password),
     posPinHash: await hashPassword(posPin),
@@ -432,6 +500,7 @@ export async function updateBarber(formData: FormData) {
   const email = value(formData, "email").toLowerCase();
   const phone = value(formData, "phone");
   const smsNotificationsEnabled = formData.get("smsNotificationsEnabled") === "on";
+  const adminAccess = formData.get("adminAccess") === "on";
   const commissionPercentage = Number(value(formData, "commissionPercentage"));
   const specialty = value(formData, "specialty");
   const nickname = value(formData, "nickname");
@@ -439,7 +508,7 @@ export async function updateBarber(formData: FormData) {
   const photo = await readBarberPhoto(formData, "barbers");
   if (
     name.length < 2 ||
-    !email.includes("@") ||
+    (email.length > 0 && !email.includes("@")) ||
     (phone.length > 0 && !isValidSmsPhone(phone)) ||
     (smsNotificationsEnabled && !isValidSmsPhone(phone)) ||
     !Number.isFinite(commissionPercentage) ||
@@ -457,6 +526,7 @@ export async function updateBarber(formData: FormData) {
     email,
     phone,
     smsNotificationsEnabled,
+    adminAccess,
     specialty,
     nickname,
     bio,
@@ -521,7 +591,11 @@ export async function updateBarber(formData: FormData) {
   revalidatePath("/book");
 }
 
-async function adminAppointmentValues(formData: FormData, tab: "add-appointment" | "appointments") {
+async function adminAppointmentValues(
+  formData: FormData,
+  tab: "add-appointment" | "appointments",
+  existingAppointment?: Record<string, unknown>,
+) {
   const name = value(formData, "name");
   const phone = value(formData, "phone");
   const email = value(formData, "email").toLowerCase();
@@ -531,12 +605,23 @@ async function adminAppointmentValues(formData: FormData, tab: "add-appointment"
   const time = value(formData, "time");
   const status = value(formData, "status") || "confirmed";
   const visitType = value(formData, "visitType") || "appointment";
+  const serviceCatalog = await getServiceCatalog();
+  const catalogService = serviceCatalog.find((item) => item.name === serviceName);
+  const service = catalogService ?? (
+    tab === "appointments" && existingAppointment?.service === serviceName
+      ? {
+          id: String(existingAppointment.serviceId ?? "historical-service"),
+          name: serviceName,
+          price: String(existingAppointment.price ?? "TBD"),
+        }
+      : undefined
+  );
 
   if (
     name.length < 2 ||
     phone.length < 7 ||
     !email.includes("@") ||
-    !SERVICE_NAMES.includes(serviceName as (typeof SERVICE_NAMES)[number]) ||
+    !service ||
     !ObjectId.isValid(barberId) ||
     !date ||
     !time ||
@@ -554,9 +639,8 @@ async function adminAppointmentValues(formData: FormData, tab: "add-appointment"
   });
   if (!barber) dashboardError("admin", "Choose an active barber.", tab);
 
-  const service = SERVICE_CATALOG.find((item) => item.name === serviceName);
-  const offeredServices = barber.services ?? [...SERVICE_IDS];
-  if (!service || !offeredServices.includes(service.id)) {
+  const offeredServices = barber.services ?? serviceCatalog.map((item) => item.id);
+  if (!service || (catalogService && !offeredServices.includes(service.id))) {
     dashboardError("admin", `${barber.name} does not offer that service.`, tab);
   }
 
@@ -597,8 +681,103 @@ async function adminAppointmentValues(formData: FormData, tab: "add-appointment"
   };
 }
 
-export async function createAdminAppointment(formData: FormData) {
+function normalizeServicePrice(input: string) {
+  const price = input.trim();
+  if (/^tbd$/i.test(price)) return "TBD";
+  const numeric = price.replace(/^\$/, "").trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(numeric)) return null;
+  const amount = Number(numeric);
+  if (!Number.isFinite(amount) || amount < 0 || amount > 10000) return null;
+  return `$${amount.toFixed(Number.isInteger(amount) ? 0 : 2)}`;
+}
+
+function serviceSlug(name: string) {
+  return name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 60);
+}
+
+function revalidateServicePages() {
+  revalidatePath("/admin/dashboard");
+  revalidatePath("/barber/dashboard");
+  revalidatePath("/services");
+  revalidatePath("/book");
+  revalidatePath("/pos");
+}
+
+export async function createService(formData: FormData) {
   await requireStaffRole("admin");
+  const name = value(formData, "name");
+  const description = value(formData, "description");
+  const price = normalizeServicePrice(value(formData, "price"));
+  if (name.length < 2 || name.length > 100 || description.length < 2 || description.length > 600 || !price) {
+    dashboardError("admin", "Enter a service name, price such as $35 or TBD, and description.", "services");
+  }
+
+  const services = await ensureServiceCatalog();
+  const duplicate = await services.findOne({ name: { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" } });
+  if (duplicate) dashboardError("admin", "A service with that name already exists.", "services");
+  const last = await services.find({}).sort({ sortOrder: -1 }).limit(1).next();
+  const baseId = serviceSlug(name) || "service";
+  let id = baseId;
+  let suffix = 2;
+  while (await services.findOne({ id })) id = `${baseId.slice(0, 55)}-${suffix++}`;
+  const now = new Date();
+  await services.insertOne({
+    id,
+    name,
+    price,
+    description,
+    sortOrder: Number(last?.sortOrder ?? 0) + 10,
+    createdAt: now,
+    updatedAt: now,
+  });
+  revalidateServicePages();
+  redirect("/admin/dashboard?tab=services");
+}
+
+export async function updateService(formData: FormData) {
+  await requireStaffRole("admin");
+  const id = value(formData, "serviceId");
+  const name = value(formData, "name");
+  const description = value(formData, "description");
+  const price = normalizeServicePrice(value(formData, "price"));
+  if (!id || name.length < 2 || name.length > 100 || description.length < 2 || description.length > 600 || !price) {
+    dashboardError("admin", "Enter a valid service name, price, and description.", "services");
+  }
+  const services = await ensureServiceCatalog();
+  const duplicate = await services.findOne({
+    id: { $ne: id },
+    name: { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
+  });
+  if (duplicate) dashboardError("admin", "A service with that name already exists.", "services");
+  const result = await services.updateOne({ id }, { $set: { name, price, description, updatedAt: new Date() } });
+  if (!result.matchedCount) dashboardError("admin", "Service not found.", "services");
+  revalidateServicePages();
+  redirect("/admin/dashboard?tab=services");
+}
+
+export async function deleteService(formData: FormData) {
+  await requireStaffRole("admin");
+  const id = value(formData, "serviceId");
+  const services = await ensureServiceCatalog();
+  if ((await services.countDocuments()) <= 1) {
+    dashboardError("admin", "The shop must keep at least one service.", "services");
+  }
+  const deleted = await services.deleteOne({ id });
+  if (!deleted.deletedCount) dashboardError("admin", "Service not found.", "services");
+  const staff = await getStaffCollection();
+  await staff.updateMany({ role: "barber" }, { $pull: { services: id } });
+  revalidateServicePages();
+  redirect("/admin/dashboard?tab=services");
+}
+
+export async function createAdminAppointment(formData: FormData) {
+  const admin = await requireStaffRole("admin");
   const values = await adminAppointmentValues(formData, "add-appointment");
   const client = await getMongoClient();
   const db = client.db("hqonmain");
@@ -613,14 +792,24 @@ export async function createAdminAppointment(formData: FormData) {
   ) {
     dashboardError("admin", "That barber already has an appointment at this time.", "add-appointment");
   }
-  const customer = await db.collection("customers").findOne({ email: values.email });
+  let customer;
+  try {
+    customer = await resolveCustomer({
+      phone: values.phone, name: values.name, email: values.email, source: values.visitType === "walk-in" ? "walk_in" : value(formData, "bookingSource") === "phone" ? "phone" : "staff", createdByUserId: admin._id,
+    });
+  } catch (error) {
+    dashboardError("admin", error instanceof Error ? error.message : "Enter a valid customer phone number.", "add-appointment");
+  }
 
   const now = new Date();
+  const bookingSource: BookingSource = values.visitType === "walk-in" ? "walk_in" : value(formData, "bookingSource") === "phone" ? "phone" : "staff";
   const appointment = {
     name: values.name,
-    phone: values.phone,
+    phone: customer.phone,
     email: values.email,
     customerId: customer?._id,
+    recipientName: values.name,
+    recipientType: "self",
     service: values.serviceName,
     serviceId: values.serviceId,
     price: values.price,
@@ -632,19 +821,21 @@ export async function createAdminAppointment(formData: FormData) {
     visitType: values.visitType,
     notes: values.notes,
     source: values.visitType === "walk-in" ? "walk-in" : "admin",
+    bookingSource,
+    createdByUserId: admin._id,
     smsConsent: formData.get("smsConsent") === "on",
     smsConsentAt: formData.get("smsConsent") === "on" ? now : undefined,
     smsConsentSource: formData.get("smsConsent") === "on" ? "staff-confirmed" : undefined,
     createdAt: now,
     updatedAt: now,
   };
-  const result = await db.collection("appointments").insertOne(appointment);
+  const savedAppointment = await createAppointment({ db, appointment, bookingSource, customerId: customer._id, recipientName: values.name, createdByUserId: admin._id });
   if (["pending", "confirmed"].includes(values.status)) {
     await Promise.all([
       values.status === "confirmed"
-        ? sendAppointmentConfirmation({ ...appointment, _id: result.insertedId })
+        ? sendAppointmentConfirmation(savedAppointment)
         : Promise.resolve({ sent: false, reason: "not-confirmed" }),
-      sendBarberNewAppointment({ ...appointment, _id: result.insertedId }),
+      sendBarberNewAppointment(savedAppointment),
     ]);
   }
 
@@ -653,14 +844,18 @@ export async function createAdminAppointment(formData: FormData) {
 }
 
 export async function updateAdminAppointment(formData: FormData) {
-  await requireStaffRole("admin");
+  const admin = await requireStaffRole("admin");
   const appointmentId = value(formData, "appointmentId");
   if (!ObjectId.isValid(appointmentId)) {
     dashboardError("admin", "Invalid appointment.", "appointments");
   }
-  const values = await adminAppointmentValues(formData, "appointments");
   const client = await getMongoClient();
   const db = client.db("hqonmain");
+  const existing = await db.collection("appointments").findOne({
+    _id: new ObjectId(appointmentId),
+  });
+  if (!existing) dashboardError("admin", "Appointment not found.", "appointments");
+  const values = await adminAppointmentValues(formData, "appointments", existing);
   if (
     ["pending", "confirmed"].includes(values.status) &&
     await db.collection("appointments").findOne({
@@ -673,20 +868,57 @@ export async function updateAdminAppointment(formData: FormData) {
   ) {
     dashboardError("admin", "That barber already has an appointment at this time.", "appointments");
   }
-  const customer = await db.collection("customers").findOne({ email: values.email });
-  const existing = await db.collection("appointments").findOne({
-    _id: new ObjectId(appointmentId),
-  });
-  if (!existing) dashboardError("admin", "Appointment not found.", "appointments");
-
+  let customer;
+  try {
+    customer = await resolveCustomer({
+      phone: values.phone,
+      name: values.name,
+      email: values.email,
+      source: values.visitType === "walk-in" ? "walk_in" : "staff",
+      createdByUserId: admin._id,
+    });
+  } catch (error) {
+    dashboardError("admin", error instanceof Error ? error.message : "Enter a valid customer phone number.", "appointments");
+  }
+  const checkoutAmountCents = typeof existing.checkoutAmountCents === "number"
+    ? parseMoneyToCents(value(formData, "checkoutAmount"))
+    : null;
+  if (typeof existing.checkoutAmountCents === "number" && checkoutAmountCents === null) {
+    dashboardError("admin", "Enter a valid cash total for the completed appointment.", "appointments");
+  }
+  const auditChanges: FinancialAuditChange[] = [
+    ...(String(existing.barber ?? "") !== values.barber.name ? [{ field: "Barber", before: String(existing.barber ?? "Unassigned"), after: values.barber.name }] : []),
+    ...(String(existing.service ?? "") !== values.serviceName ? [{ field: "Service", before: String(existing.service ?? "Not specified"), after: values.serviceName }] : []),
+    ...(String(existing.requestedDate ?? "") !== values.date ? [{ field: "Date", before: String(existing.requestedDate ?? ""), after: values.date }] : []),
+    ...(String(existing.requestedTime ?? "") !== values.time ? [{ field: "Time", before: String(existing.requestedTime ?? ""), after: values.time }] : []),
+    ...(String(existing.status ?? "") !== values.status ? [{ field: "Status", before: String(existing.status ?? ""), after: values.status }] : []),
+    ...(String(existing.visitType ?? "appointment") !== values.visitType ? [{ field: "Visit type", before: String(existing.visitType ?? "appointment"), after: values.visitType }] : []),
+    ...(checkoutAmountCents !== null && checkoutAmountCents !== Number(existing.checkoutAmountCents)
+      ? [{ field: "Cash total", before: formatMoney(Number(existing.checkoutAmountCents)), after: formatMoney(checkoutAmountCents) }]
+      : []),
+  ];
+  const closedDates = [...new Set([String(existing.requestedDate ?? ""), values.date])].filter(
+    (businessDate) => /^\d{4}-\d{2}-\d{2}$/.test(businessDate),
+  );
+  const auditedDates = typeof existing.checkoutAmountCents === "number" && auditChanges.length
+    ? (await Promise.all(closedDates.map(async (businessDate) => ({ businessDate, closed: await hasDrawerCloseout(db, businessDate) })))).filter((item) => item.closed).map((item) => item.businessDate)
+    : [];
+  const auditReason = value(formData, "auditReason");
+  if (auditedDates.length && auditReason.length < 3) {
+    dashboardError("admin", "Enter a reason for changing financial information after drawer closeout.", "appointments");
+  }
+  const commissionPercentage = Math.min(100, Math.max(0, Number(existing.commissionPercentageSnapshot ?? values.barber.commissionPercentage ?? 0)));
+  const commissionAmountCents = checkoutAmountCents === null ? null : Math.round(checkoutAmountCents * commissionPercentage / 100);
   const result = await db.collection("appointments").updateOne(
     { _id: new ObjectId(appointmentId) },
     {
       $set: {
         name: values.name,
-        phone: values.phone,
+        phone: customer.phone,
         email: values.email,
-        customerId: customer?._id,
+        customerId: customer._id,
+        recipientName: values.name,
+        recipientType: "self",
         service: values.serviceName,
         serviceId: values.serviceId,
         price: values.price,
@@ -697,11 +929,29 @@ export async function updateAdminAppointment(formData: FormData) {
         status: values.status,
         visitType: values.visitType,
         notes: values.notes,
+        ...(checkoutAmountCents !== null && commissionAmountCents !== null ? {
+          checkoutAmountCents,
+          commissionAmountCents,
+          shopAmountCents: checkoutAmountCents - commissionAmountCents,
+        } : {}),
         updatedAt: new Date(),
       },
     },
   );
   if (!result.matchedCount) dashboardError("admin", "Appointment not found.", "appointments");
+  if (values.status === "completed") {
+    await db.collection("customers").updateOne({ _id: customer._id }, { $set: { lastVisitAt: new Date(), updatedAt: new Date() } });
+  }
+  await Promise.all(auditedDates.map((businessDate) => recordPostCloseoutChange({
+    db,
+    businessDate,
+    actor: admin,
+    entityType: "appointment",
+    entityId: existing._id,
+    summary: `${String(existing.barber ?? values.barber.name)}'s appointment for ${String(existing.name ?? values.name)} changed after closeout.`,
+    reason: auditReason,
+    changes: auditChanges,
+  })));
   if (existing.status !== "cancelled" && values.status === "cancelled") {
     await sendAppointmentCancellationNotifications({
       ...existing,

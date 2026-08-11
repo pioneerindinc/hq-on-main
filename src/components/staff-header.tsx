@@ -5,9 +5,11 @@ import { logout } from "@/app/actions/auth";
 export function StaffHeader({
   name,
   area,
+  alternatePortal,
 }: {
   name: string;
   area: "Admin" | "Barber";
+  alternatePortal?: { href: string; label: string };
 }) {
   return (
     <header className="staff-header">
@@ -20,6 +22,7 @@ export function StaffHeader({
           <strong>{name}</strong>
         </div>
         <div className="staff-header-actions">
+          {alternatePortal && <Link className="staff-pos-link" href={alternatePortal.href}>{alternatePortal.label}</Link>}
           <Link className="staff-pos-link" href="/pos">Open POS</Link>
           <form action={logout}>
             <button className="staff-logout" type="submit">Log out</button>

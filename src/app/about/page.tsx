@@ -43,7 +43,7 @@ export default function AboutPage() {
             </p>
             <br></br>
             <p className="story-lead">
-              With every men's haircut, you get to enjoy a hot lather, straight
+              With every men&apos;s haircut, you get to enjoy a hot lather, straight
               razor neck shave, and hot towel finish. Come join our family
               atmosphere! 
             </p>

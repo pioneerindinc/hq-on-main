@@ -6,10 +6,12 @@ export function PosCashOutButton({
   barberId,
   barberName,
   amount,
+  requiresAuditReason = false,
 }: {
   barberId: string;
   barberName: string;
   amount: string;
+  requiresAuditReason?: boolean;
 }) {
   return (
     <form
@@ -21,6 +23,7 @@ export function PosCashOutButton({
       }}
     >
       <input name="barberId" type="hidden" value={barberId} />
+      {requiresAuditReason && <input className="pos-payout-audit-reason" name="auditReason" minLength={3} maxLength={300} placeholder="Reason after closeout" aria-label="Reason for payout after closeout" required />}
       <button type="submit">Cash out {amount}</button>
     </form>
   );

@@ -7,17 +7,19 @@ import {
   updateBarberAppointment,
 } from "@/app/actions/staff";
 import { BarberAddAppointmentForm } from "@/components/barber-add-appointment-form";
-import { RegisterPerformance } from "@/components/register-performance";
+import { BarberTotalsReport } from "@/components/barber-totals-report";
 import { StaffHeader } from "@/components/staff-header";
 import { requireStaffRole } from "@/lib/auth";
+import {
+  type BarberTotalsPayout,
+  buildBarberTotalsReport,
+  normalizeTotalsDate,
+  normalizeTotalsPeriod,
+  totalsRange,
+} from "@/lib/barber-totals";
 import { currentShopDateTime, defaultHours } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
-import {
-  type PerformancePayout,
-  buildPerformancePeriods,
-  performanceRangeStart,
-} from "@/lib/register-performance";
-import { SERVICE_CATALOG, SERVICE_IDS } from "@/lib/services";
+import { getServiceCatalog } from "@/lib/services";
 
 export const metadata: Metadata = {
   title: "Barber Dashboard | HQ on Main",
@@ -47,7 +49,7 @@ type Availability = {
   breakEnd?: string;
 };
 
-type BarberPerformancePayout = PerformancePayout & {
+type BarberPerformancePayout = BarberTotalsPayout & {
   barberId?: ObjectId;
 };
 
@@ -64,6 +66,7 @@ type Appointment = {
   source?: string;
   notes?: string;
   checkoutAmountCents?: number;
+  commissionAmountCents?: number;
   checkoutMethod?: string;
 };
 
@@ -86,14 +89,19 @@ function isDashboardTab(value?: string): value is DashboardTab {
 export default async function BarberDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; tab?: string }>;
+  searchParams: Promise<{ error?: string; tab?: string; period?: string; date?: string }>;
 }) {
   const barber = await requireStaffRole("barber");
   const client = await getMongoClient();
   const db = client.db("hqonmain");
+  const serviceCatalog = await getServiceCatalog();
+  const { error, tab, period, date } = await searchParams;
+  const activeTab: DashboardTab = isDashboardTab(tab) ? tab : "totals";
   const barberAppointmentFilter = { $or: [{ barberId: barber._id }, { barber: barber.name }] };
   const today = currentShopDateTime().date;
-  const rangeStart = performanceRangeStart(today);
+  const selectedPeriod = normalizeTotalsPeriod(period);
+  const selectedDate = normalizeTotalsDate(date, today);
+  const selectedRange = totalsRange(selectedPeriod, selectedDate);
   const [availabilityRows, appointments, activeAppointmentSlots, performanceSales, performancePayouts] = await Promise.all([
     db.collection<Availability>("availability").find({ barberId: barber._id }).toArray(),
     db.collection<Appointment>("appointments")
@@ -110,21 +118,19 @@ export default async function BarberDashboard({
       .toArray(),
     db.collection<Appointment>("appointments").find({
       ...barberAppointmentFilter,
-      requestedDate: { $gte: rangeStart, $lte: today },
+      requestedDate: { $gte: selectedRange.start, $lte: selectedRange.end },
       status: "completed",
       checkoutMethod: "cash",
       checkoutAmountCents: { $gte: 0 },
     }).toArray(),
     db.collection<BarberPerformancePayout>("commissionPayouts").find({
       barberId: barber._id,
-      businessDate: { $gte: rangeStart, $lte: today },
+      businessDate: { $gte: selectedRange.start, $lte: selectedRange.end },
     }).toArray(),
   ]);
   const availability = new Map(availabilityRows.map((row) => [row.day, row]));
-  const { error, tab } = await searchParams;
-  const activeTab: DashboardTab = isDashboardTab(tab) ? tab : "totals";
-  const selectedServices = barber.services ?? [...SERVICE_IDS];
-  const offeredServices = SERVICE_CATALOG.filter((service) =>
+  const selectedServices = barber.services ?? serviceCatalog.map((service) => service.id);
+  const offeredServices = serviceCatalog.filter((service) =>
     selectedServices.includes(service.id),
   );
   const weeklySchedule = days.map((day, index) => {
@@ -144,7 +150,7 @@ export default async function BarberDashboard({
       date: appointment.requestedDate ?? "",
       time: appointment.requestedTime ?? "",
   }));
-  const performancePeriods = buildPerformancePeriods(performanceSales, performancePayouts, today);
+  const totalsReport = buildBarberTotalsReport(performanceSales, performancePayouts, selectedRange, today);
   const upcoming = appointments.filter(
     (appointment) =>
       (appointment.requestedDate ?? "") >= today &&
@@ -153,7 +159,11 @@ export default async function BarberDashboard({
 
   return (
     <main className="portal-page">
-      <StaffHeader name={barber.name} area="Barber" />
+      <StaffHeader
+        name={barber.name}
+        area="Barber"
+        alternatePortal={barber.adminAccess ? { href: "/admin/dashboard", label: "Admin portal" } : undefined}
+      />
       <div className="container portal-content">
         <section className="portal-title">
           <div><p className="eyebrow">Barber workspace</p><h1>Your chair.</h1></div>
@@ -193,7 +203,7 @@ export default async function BarberDashboard({
                   <div><h2>Your totals</h2></div>
                   <p>Completed cash sales and recorded commission payouts.</p>
                 </div>
-                <RegisterPerformance periods={performancePeriods} />
+                <BarberTotalsReport report={totalsReport} today={today} />
               </section>
             )}
 
@@ -245,7 +255,7 @@ export default async function BarberDashboard({
                   <p>Select every service guests can book with you.</p>
                 </div>
                 <form className="service-selector" action={saveBarberServices}>
-                  {SERVICE_CATALOG.map((service) => (
+                  {serviceCatalog.map((service) => (
                     <label className="service-option" key={service.id}>
                       <input
                         name={`service_${service.id}`}
@@ -307,6 +317,12 @@ export default async function BarberDashboard({
                         </select>
                       </label>
                       <label>Notes<input name="notes" defaultValue={appointment.notes ?? ""} /></label>
+                      {typeof appointment.checkoutAmountCents === "number" && (
+                        <label>Cash total<input name="checkoutAmount" type="number" min="0.01" max="100000" step="0.01" defaultValue={(appointment.checkoutAmountCents / 100).toFixed(2)} required /></label>
+                      )}
+                      {typeof appointment.checkoutAmountCents === "number" && (
+                        <label className="appointment-audit-reason">Correction reason<input name="auditReason" maxLength={300} placeholder="Required for changes after drawer closeout" /></label>
+                      )}
                       <button className="portal-save" type="submit">Save</button>
                     </form>
                   ))}

@@ -1,10 +1,10 @@
 import { getStaffCollection } from "@/lib/auth";
 import { barberPhotoUrl } from "@/lib/barber-profile";
-import { serviceById } from "@/lib/services";
+import { getServiceById } from "@/lib/services";
 
 export async function GET(request: Request) {
   const serviceId = new URL(request.url).searchParams.get("serviceId") ?? "";
-  if (!serviceById(serviceId)) {
+  if (!await getServiceById(serviceId)) {
     return Response.json({ message: "Choose a valid service." }, { status: 400 });
   }
 

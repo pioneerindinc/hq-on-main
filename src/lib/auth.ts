@@ -26,6 +26,7 @@ export type StaffRecord = {
   smsConsentAt?: Date;
   smsConsentSource?: string;
   role: StaffRole;
+  adminAccess?: boolean;
   active: boolean;
   specialty?: string;
   nickname?: string;
@@ -140,7 +141,12 @@ export async function getCurrentStaff(): Promise<AuthenticatedStaff | null> {
 
 export async function requireStaffRole(role: StaffRole) {
   const staff = await getCurrentStaff();
-  if (!staff || staff.role !== role) {
+  if (!staff) redirect(role === "admin" ? "/admin/login" : "/barber/login");
+  const authorized = (
+    staff.role === role ||
+    (role === "admin" && staff.role === "barber" && staff.adminAccess === true)
+  );
+  if (!authorized) {
     redirect(role === "admin" ? "/admin/login" : "/barber/login");
   }
   return staff;

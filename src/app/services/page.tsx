@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { SERVICE_CATALOG } from "@/lib/services";
+import { getServiceCatalog } from "@/lib/services";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Services | HQ on Main",
@@ -8,7 +10,8 @@ export const metadata: Metadata = {
     "Explore haircuts, beard services, and premium grooming at HQ on Main in Plainfield.",
 };
 
-export default function ServicesPage() {
+export default async function ServicesPage() {
+  const services = await getServiceCatalog();
   return (
     <main>
 
@@ -21,7 +24,7 @@ export default function ServicesPage() {
             </div>
           </div>
           <div className="detailed-service-list">
-            {SERVICE_CATALOG.map((service, index) => (
+            {services.map((service, index) => (
               <article className="detailed-service" key={service.id}>
                 <span>{String(index + 1).padStart(2, "0")}</span>
                 <div>

@@ -13,7 +13,10 @@ import {
   normalizeTime,
 } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
-import { SERVICE_CATALOG, serviceById } from "@/lib/services";
+import { createAppointment } from "@/lib/appointment-service";
+import { findCustomersByPhone, resolveCustomer } from "@/lib/customer-identity";
+import { customerDisplayName, normalizePhone as normalizeCustomerPhone } from "@/lib/phone";
+import { getServiceById, getServiceCatalog } from "@/lib/services";
 import { sendAppointmentConfirmation, sendBarberNewAppointment } from "@/lib/twilio-sms";
 
 const DATABASE_NAME = "hqonmain";
@@ -84,7 +87,7 @@ export async function runVoiceTool(
     let result: unknown;
     switch (name) {
       case "list_services":
-        result = listServices();
+        result = await listServices();
         break;
       case "list_shop_openings":
         result = await listShopOpenings({
@@ -100,6 +103,13 @@ export async function runVoiceTool(
           serviceId: stringArg(args, "serviceId"),
           barberId: stringArg(args, "barberId"),
           date: stringArg(args, "date"),
+        });
+        break;
+      case "lookup_customer":
+        result = await lookupVoiceCustomer({
+          callerPhone: optionalStringArg(args, "callerPhone"),
+          spokenPhone: optionalStringArg(args, "phone"),
+          callId,
         });
         break;
       case "book_appointment":
@@ -225,10 +235,11 @@ export async function recordVoiceEvent(message: Record<string, unknown>) {
   ]);
 }
 
-function listServices() {
+async function listServices() {
+  const services = await getServiceCatalog();
   return {
     shopHours: SHOP_HOURS,
-    services: SERVICE_CATALOG.map(({ id, name, price, description }) => ({
+    services: services.map(({ id, name, price, description }) => ({
       id,
       name,
       price,
@@ -304,7 +315,7 @@ async function listShopOpenings(input: { date: string; barberName?: string }) {
 }
 
 async function listBarbers(serviceId: string) {
-  const service = serviceById(serviceId);
+  const service = await getServiceById(serviceId);
   if (!service) {
     throw new VoiceToolError("That service was not recognized. Call list_services again.");
   }
@@ -370,8 +381,14 @@ async function bookAppointment(
   const time = normalizeTime(input.time);
   if (!time) throw new VoiceToolError("The appointment time was not recognized.");
 
-  const customerName = input.customerName.trim();
-  const phone = normalizePhone(input.phone);
+  const client = await getMongoClient();
+  const db = client.db(DATABASE_NAME);
+  const call = callId
+    ? await db.collection("voiceCalls").findOne({ callId })
+    : null;
+  const phone = normalizePhone(input.phone || String(call?.customerNumber ?? call?.callerNumber ?? ""));
+  const existingMatch = await findCustomersByPhone(db, phone);
+  const customerName = input.customerName.trim() || (existingMatch.customers[0] ? customerDisplayName(existingMatch.customers[0]) : "");
   const email = (input.email ?? "").trim().toLowerCase();
   const notes = (input.notes ?? "").trim().slice(0, 500);
   if (customerName.length < 2) {
@@ -384,8 +401,6 @@ async function bookAppointment(
     throw new VoiceToolError("The email address is not valid. It may be omitted.");
   }
 
-  const client = await getMongoClient();
-  const db = client.db(DATABASE_NAME);
   await db.collection("appointments").createIndex(
     { voiceToolCallId: 1 },
     {
@@ -405,11 +420,21 @@ async function bookAppointment(
     );
   }
 
+  const customer = await resolveCustomer({
+    phone,
+    name: customerName,
+    email,
+    source: "vapi",
+  });
+
   const now = new Date();
   const appointment = {
     name: customerName,
-    email,
-    phone,
+    email: email || customer.email || "",
+    phone: customer.phone,
+    customerId: customer._id,
+    recipientName: customerName,
+    recipientType: "self",
     service: service.name,
     serviceId: service.id,
     price: service.price,
@@ -420,6 +445,7 @@ async function bookAppointment(
     status: "confirmed",
     notes,
     source: "voice",
+    bookingSource: "vapi",
     smsConsent: input.smsConsent,
     smsConsentAt: input.smsConsent ? now : undefined,
     smsConsentSource: input.smsConsent ? "voice-verbal" : undefined,
@@ -430,8 +456,7 @@ async function bookAppointment(
   };
 
   try {
-    const result = await db.collection("appointments").insertOne(appointment);
-    const savedAppointment = { ...appointment, _id: result.insertedId };
+    const savedAppointment = await createAppointment({ db, appointment, bookingSource: "vapi", customerId: customer._id, recipientName: customerName });
     const [sms, barberSms] = await Promise.all([
       sendAppointmentConfirmation(savedAppointment),
       sendBarberNewAppointment(savedAppointment),
@@ -448,8 +473,27 @@ async function bookAppointment(
   }
 }
 
+async function lookupVoiceCustomer({ callerPhone, spokenPhone, callId }: { callerPhone?: string; spokenPhone?: string; callId: string }) {
+  const client = await getMongoClient();
+  const db = client.db(DATABASE_NAME);
+  const call = callId ? await db.collection("voiceCalls").findOne({ callId }) : null;
+  const storedCallerPhone = String(call?.customerNumber ?? call?.callerNumber ?? "");
+  const phone = [callerPhone, storedCallerPhone, spokenPhone]
+    .map((candidate) => normalizeCustomerPhone(candidate))
+    .find(Boolean);
+  const match = await findCustomersByPhone(db, phone);
+  if (!match.normalizedPhone) return { found: false, needsPhone: true };
+  return {
+    found: match.customers.length > 0,
+    needsName: match.customers.length === 0,
+    responseGuidance: match.customers.length
+      ? "A customer record is already linked to this number. Do not create a separate customer; continue the booking naturally. Do not reveal appointment history."
+      : "No customer record is linked yet. Ask for the customer's name once, then continue.",
+  };
+}
+
 async function eligibleBarber(serviceId: string, barberId: string) {
-  const service = serviceById(serviceId);
+  const service = await getServiceById(serviceId);
   if (!service) {
     throw new VoiceToolError("That service was not recognized. Call list_services again.");
   }

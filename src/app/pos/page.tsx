@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Image from "next/image";
+import Link from "next/link";
 import { ObjectId } from "mongodb";
 import {
   completePosAppointment,
@@ -8,6 +9,7 @@ import {
 } from "@/app/actions/pos";
 import { PosBarberSelector } from "@/components/pos-barber-selector";
 import { PosCashOutButton } from "@/components/pos-cash-out-button";
+import { PosDrawerReconciliation } from "@/components/pos-drawer-reconciliation";
 import { PosWalkInCheckout } from "@/components/pos-walk-in-checkout";
 import { getStaffCollection } from "@/lib/auth";
 import {
@@ -27,7 +29,7 @@ import {
 } from "@/lib/money";
 import { getMongoClient } from "@/lib/mongodb";
 import { getCurrentPosBarber } from "@/lib/pos-auth";
-import { SERVICE_CATALOG } from "@/lib/services";
+import { getServiceCatalog, type ServiceCatalogItem } from "@/lib/services";
 
 export const metadata: Metadata = {
   title: "Cash Register | HQ on Main",
@@ -64,6 +66,18 @@ type CommissionPayout = {
   paidAmountCents?: unknown;
 };
 
+type DrawerCloseout = {
+  businessDate?: unknown;
+  countedDrawerCents?: unknown;
+  varianceCents?: unknown;
+  expectedDrawerCents?: unknown;
+  actualDrawerCents?: unknown;
+  expectedPhysicalDrawerCents?: unknown;
+  targetDrawerCents?: unknown;
+  reconciledByName?: unknown;
+  reconciledAt?: unknown;
+};
+
 function text(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value : fallback;
 }
@@ -72,19 +86,29 @@ function cents(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 0;
 }
 
-function appointmentPriceCents(appointment: PosAppointment) {
+function closeoutTime(value: unknown) {
+  if (!(value instanceof Date) || Number.isNaN(value.valueOf())) return "unknown time";
+  return value.toLocaleTimeString("en-US", {
+    timeZone: process.env.BARBERSHOP_TIME_ZONE || "America/Indiana/Indianapolis",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function appointmentPriceCents(appointment: PosAppointment, services: ServiceCatalogItem[]) {
   const savedPrice = priceLabelToCents(appointment.price);
   if (savedPrice !== null) return savedPrice;
-  const service = SERVICE_CATALOG.find((item) => item.name === text(appointment.service));
+  const service = services.find((item) => item.name === text(appointment.service));
   return priceLabelToCents(service?.price);
 }
 
 export default async function PosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; notice?: string }>;
+  searchParams: Promise<{ error?: string; notice?: string; view?: string }>;
 }) {
-  const { error, notice } = await searchParams;
+  const { error, notice, view } = await searchParams;
+  const activeView = view === "cashout" ? "cashout" : "checkout";
   const currentBarber = await getCurrentPosBarber();
   const client = await getMongoClient();
   const db = client.db("hqonmain");
@@ -132,7 +156,7 @@ export default async function PosPage({
     );
   }
 
-  const [appointments, dailySales, payouts, barbers] = await Promise.all([
+  const [appointments, dailySales, payouts, barbers, drawerCloseout] = await Promise.all([
     db.collection<PosAppointment>("appointments").find({
       $or: [{ barberId: currentBarber._id }, { barber: currentBarber.name }],
       requestedDate: shopNow.date,
@@ -145,7 +169,9 @@ export default async function PosPage({
     }).toArray(),
     db.collection<CommissionPayout>("commissionPayouts").find({ businessDate: shopNow.date }).toArray(),
     (await getStaffCollection()).find({ role: "barber" }).sort({ name: 1 }).toArray(),
+    db.collection<DrawerCloseout>("drawerCloseouts").findOne({ businessDate: shopNow.date }),
   ]);
+  const serviceCatalog = await getServiceCatalog();
   const paidByBarber = new Map(
     payouts.map((payout) => [String(payout.barberId ?? ""), cents(payout.paidAmountCents)]),
   );
@@ -158,11 +184,12 @@ export default async function PosPage({
     const paid = paidByBarber.get(barber._id.toString()) ?? 0;
     return { barber, earned, paid, roundedPayout, due: Math.max(0, roundedPayout - paid) };
   }).filter((row) => row.earned > 0 || row.paid > 0);
-  const grossCash = dailySales.reduce((total, sale) => total + cents(sale.checkoutAmountCents), 0);
-  const roundedBarberPay = teamPayouts.reduce((total, row) => total + row.roundedPayout, 0);
-  const shopPay = grossCash - roundedBarberPay;
-  const offeredServiceIds = currentBarber.services ?? SERVICE_CATALOG.map((service) => service.id);
-  const walkInServices = SERVICE_CATALOG.filter((service) => offeredServiceIds.includes(service.id));
+  const payoutsDueCount = teamPayouts.filter((row) => row.due > 0).length;
+  const cashSalesCents = dailySales.reduce((total, sale) => total + cents(sale.checkoutAmountCents), 0);
+  const paidPayoutsCents = payouts.reduce((total, payout) => total + cents(payout.paidAmountCents), 0);
+  const expectedDrawerCents = 20_000 + cashSalesCents - paidPayoutsCents;
+  const offeredServiceIds = currentBarber.services ?? serviceCatalog.map((service) => service.id);
+  const walkInServices = serviceCatalog.filter((service) => offeredServiceIds.includes(service.id));
 
   return (
     <main className="pos-page pos-register-page">
@@ -179,15 +206,22 @@ export default async function PosPage({
         {error && <p className="pos-alert error" role="alert">{error}</p>}
         {notice && <p className="pos-alert success" role="status">{notice}</p>}
 
+        <nav className="pos-register-tabs" aria-label="Register sections">
+          <Link className={activeView === "checkout" ? "active" : ""} href="/pos" aria-current={activeView === "checkout" ? "page" : undefined}>
+            <span>Checkout</span><small>Appointments and walk-ins</small>
+          </Link>
+          <Link className={activeView === "cashout" ? "active" : ""} href="/pos?view=cashout" aria-current={activeView === "cashout" ? "page" : undefined}>
+            <span>Cash Out</span><small>{payoutsDueCount ? `${payoutsDueCount} ${payoutsDueCount === 1 ? "barber" : "barbers"} due` : "End-of-day payouts"}</small>
+          </Link>
+        </nav>
+
+        {activeView === "cashout" ? (
+
         <section className="pos-team-payouts" aria-labelledby="team-payout-heading">
           <div className="pos-payout-heading">
-            <div><p className="eyebrow">End-of-day cash out</p><h1 id="team-payout-heading">Barber payouts</h1></div>
+            <div><p className="eyebrow">End-of-day</p><h1 id="team-payout-heading">Cash out</h1></div>
             <p>{formatDisplayDate(shopNow.date)} · Rounded to whole dollars</p>
           </div>
-          <article className="pos-shop-pay-card">
-            <div><small>Shop pay for today</small><strong>{formatMoney(shopPay)}</strong></div>
-            <p>Cash sales after all rounded barber payouts.</p>
-          </article>
           {teamPayouts.length > 0 ? (
             <div className="pos-payout-grid">
               {teamPayouts.map(({ barber, due }) => (
@@ -197,7 +231,7 @@ export default async function PosPage({
                     <h2>{barber.name}</h2>
                   </div>
                   <div className="pos-payout-amount">
-                    <small>Due today</small>
+                    <small>Pay today</small>
                     <strong>{formatWholeDollarMoney(due)}</strong>
                   </div>
                   {due > 0 ? (
@@ -205,6 +239,7 @@ export default async function PosPage({
                       barberId={barber._id.toString()}
                       barberName={barber.name}
                       amount={formatWholeDollarMoney(due)}
+                      requiresAuditReason={Boolean(drawerCloseout)}
                     />
                   ) : (
                     <span className="pos-paid-label">Paid out</span>
@@ -215,9 +250,27 @@ export default async function PosPage({
           ) : (
             <p className="pos-empty">No barber payouts have been earned today.</p>
           )}
+          <PosDrawerReconciliation
+            targetCents={expectedDrawerCents}
+            payoutsDueCount={payoutsDueCount}
+            priorCloseout={drawerCloseout ? {
+              expectedPhysicalDrawerCents: cents(drawerCloseout.expectedPhysicalDrawerCents ?? drawerCloseout.targetDrawerCents ?? 20_000),
+              countedDrawerCents: cents(drawerCloseout.countedDrawerCents),
+              varianceCents: cents(drawerCloseout.varianceCents),
+              reconciledByName: text(drawerCloseout.reconciledByName, "Staff"),
+              reconciledAt: closeoutTime(drawerCloseout.reconciledAt),
+            } : undefined}
+          />
         </section>
 
-        <PosWalkInCheckout services={walkInServices} />
+        ) : (
+          <div className="pos-checkout-workspace">
+            <div className="pos-checkout-heading">
+              <div><p className="eyebrow">Today&apos;s register</p><h1>Checkout</h1></div>
+              <p>Select a scheduled appointment below or record a walk-in cash service.</p>
+            </div>
+
+        <PosWalkInCheckout services={walkInServices} requiresAuditReason={Boolean(drawerCloseout)} />
 
         <section className="pos-appointments-section">
           <div className="pos-section-heading">
@@ -229,7 +282,7 @@ export default async function PosPage({
             {appointments.length === 0 && <p className="pos-empty">No appointments are assigned to you today.</p>}
             {appointments.map((appointment) => {
               const status = text(appointment.status, "pending");
-              const knownPrice = appointmentPriceCents(appointment);
+              const knownPrice = appointmentPriceCents(appointment, serviceCatalog);
               const isCompleted = status === "completed" && typeof appointment.checkoutAmountCents === "number";
               const canCheckout = ["pending", "confirmed", "completed"].includes(status) && !isCompleted;
               return (
@@ -257,6 +310,11 @@ export default async function PosPage({
                         <label>Total due
                           <span><b>$</b><input name="amount" type="number" min="0.01" max="100000" step="0.01" defaultValue={knownPrice === null ? "" : (knownPrice / 100).toFixed(2)} placeholder="Enter total" required /></span>
                         </label>
+                        {drawerCloseout && (
+                          <label className="pos-checkout-audit-reason">Post-closeout reason
+                            <input name="auditReason" minLength={3} maxLength={300} placeholder="Why is this checkout being added after closeout?" required />
+                          </label>
+                        )}
                         <button type="submit">Complete · Cash paid</button>
                       </form>
                       <form className="pos-status-actions" action={updatePosAppointmentStatus}>
@@ -277,6 +335,8 @@ export default async function PosPage({
             })}
           </div>
         </section>
+          </div>
+        )}
       </div>
     </main>
   );

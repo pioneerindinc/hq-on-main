@@ -1,5 +1,39 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Customer phone identity
+
+Customers authenticate with an SMS one-time code; customer passwords are no longer used. Online, staff, POS, and Vapi booking paths resolve the same `customers` collection by canonical E.164 phone number and store a controlled `bookingSource` on each appointment.
+
+Set these server-only variables before using customer sign-in:
+
+```bash
+CUSTOMER_OTP_SECRET=a-random-secret-at-least-32-characters-long
+TWILIO_ACCOUNT_SID=
+TWILIO_API_KEY=
+TWILIO_API_KEY_SECRET=
+TWILIO_MESSAGING_SERVICE_SID=
+```
+
+`TWILIO_AUTH_TOKEN` plus `TWILIO_ACCOUNT_SID` remains a supported fallback. Do not expose any of these values through `NEXT_PUBLIC_` variables.
+
+Before deploying the schema change, back up MongoDB and preview the migration:
+
+```bash
+npm run migrate:customer-phone
+```
+
+The preview does not write data. Review its invalid-phone and duplicate counts, then apply it during a quiet booking window:
+
+```bash
+npm run migrate:customer-phone -- --apply
+```
+
+The migration preserves customer IDs and history, chooses the oldest record as canonical for an exact normalized-phone group, flags rather than deletes duplicate records, links strong phone matches, backfills appointment booking sources, and creates the partial unique phone index. Records without a usable phone remain preserved with `status: needs_phone`.
+
+The Vapi scheduling endpoint also accepts a `lookup_customer` tool call with an optional `phone` argument. When it is omitted, the backend uses the call's stored caller ID. Caller ID is used only for operational matching and never marks a customer phone as verified. Configure that tool in Vapi if you want the assistant to check identity before collecting booking details; `book_appointment` independently resolves the customer again, so it remains duplicate-safe.
+
+Manual duplicate merging is intentionally separate from automatic resolution. `mergeCustomerRecords` transfers appointment ownership in a transaction, retains the duplicate record as `merged`, and writes a `customerMergeAudits` entry rather than deleting history. It should only be exposed through an owner-authorized review workflow.
+
 ## Getting Started
 
 First, run the development server:

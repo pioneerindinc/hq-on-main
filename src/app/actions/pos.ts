@@ -11,25 +11,31 @@ import {
   defaultHours,
 } from "@/lib/booking";
 import {
+  formatMoney,
   formatWholeDollarMoney,
   parseMoneyToCents,
   roundCashPayoutCents,
 } from "@/lib/money";
 import { getMongoClient } from "@/lib/mongodb";
+import { createAppointment } from "@/lib/appointment-service";
+import { resolveCustomer } from "@/lib/customer-identity";
+import { normalizePhone } from "@/lib/phone";
+import { hasDrawerCloseout, recordPostCloseoutChange } from "@/lib/financial-audit";
 import {
   createPosSession,
   deletePosSession,
   getCurrentPosBarber,
 } from "@/lib/pos-auth";
-import { SERVICE_CATALOG, SERVICE_IDS } from "@/lib/services";
+import { getServiceCatalog } from "@/lib/services";
 import { sendAppointmentCancellationNotifications } from "@/lib/twilio-sms";
 
 function value(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
 }
 
-function posError(message: string): never {
-  redirect(`/pos?error=${encodeURIComponent(message)}`);
+function posError(message: string, view?: "cashout"): never {
+  const viewParam = view ? `view=${view}&` : "";
+  redirect(`/pos?${viewParam}error=${encodeURIComponent(message)}`);
 }
 
 type CommissionPayoutAudit = {
@@ -47,6 +53,30 @@ type CommissionPayoutRecord = {
   roundedPayoutCents: number;
   paidAmountCents: number;
   history: CommissionPayoutAudit[];
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type DrawerCloseoutAudit = {
+  countedDrawerCents: number;
+  varianceCents: number;
+  reconciledAt: Date;
+  reconciledByStaffId: ObjectId;
+  reconciledByName: string;
+};
+
+type DrawerCloseoutRecord = DrawerCloseoutAudit & {
+  businessDate: string;
+  openingDrawerCents: number;
+  targetDrawerCents: number;
+  cashSalesCents: number;
+  barberPayoutsCents: number;
+  expectedDrawerCents: number;
+  actualDrawerCents: number;
+  expectedPhysicalDrawerCents: number;
+  hqRetainedCents: number;
+  status: "closed";
+  history: DrawerCloseoutAudit[];
   createdAt: Date;
   updatedAt: Date;
 };
@@ -114,6 +144,11 @@ export async function completePosAppointment(formData: FormData) {
   const client = await getMongoClient();
   const db = client.db("hqonmain");
   const today = currentShopDateTime().date;
+  const auditReason = value(formData, "auditReason");
+  const isAfterCloseout = await hasDrawerCloseout(db, today);
+  if (isAfterCloseout && auditReason.length < 3) {
+    posError("Enter a reason for adding a cash checkout after today’s drawer was closed.");
+  }
   const appointmentObjectId = new ObjectId(appointmentId);
   const appointment = await db.collection("appointments").findOne({
     _id: appointmentObjectId,
@@ -145,6 +180,19 @@ export async function completePosAppointment(formData: FormData) {
     },
   );
   if (!result.modifiedCount) posError("That appointment was already checked out. Refresh the register.");
+  if (appointment.customerId instanceof ObjectId) {
+    await db.collection("customers").updateOne({ _id: appointment.customerId }, { $set: { lastVisitAt: now, updatedAt: now } });
+  }
+  await recordPostCloseoutChange({
+    db,
+    businessDate: today,
+    actor: barber,
+    entityType: "appointment",
+    entityId: appointmentObjectId,
+    summary: `${barber.name} completed ${String(appointment.name ?? "Guest")}'s appointment after closeout.`,
+    reason: auditReason,
+    changes: [{ field: "Cash total", before: "Not checked out", after: formatMoney(amountCents) }],
+  });
 
   revalidatePath("/pos");
   redirect(`/pos?notice=${encodeURIComponent("Cash checkout recorded.")}`);
@@ -158,8 +206,9 @@ export async function checkoutPosWalkIn(formData: FormData) {
   const phone = value(formData, "phone");
   const serviceId = value(formData, "serviceId");
   const amountCents = parseMoneyToCents(value(formData, "amount"));
-  const service = SERVICE_CATALOG.find((item) => item.id === serviceId);
-  const offeredServiceIds = barber.services ?? [...SERVICE_IDS];
+  const serviceCatalog = await getServiceCatalog();
+  const service = serviceCatalog.find((item) => item.id === serviceId);
+  const offeredServiceIds = barber.services ?? serviceCatalog.map((item) => item.id);
   if (
     name.length < 2 ||
     !service ||
@@ -175,10 +224,23 @@ export async function checkoutPosWalkIn(formData: FormData) {
   const shopNow = currentShopDateTime();
   const now = new Date();
   const client = await getMongoClient();
-  await client.db("hqonmain").collection("appointments").insertOne({
+  const db = client.db("hqonmain");
+  const normalizedPhone = phone ? normalizePhone(phone) : null;
+  if (phone && !normalizedPhone) posError("Enter a valid mobile number or leave it blank.");
+  const customer = normalizedPhone
+    ? await resolveCustomer({ phone: normalizedPhone, name, source: "walk_in", createdByUserId: barber._id })
+    : null;
+  const auditReason = value(formData, "auditReason");
+  if (await hasDrawerCloseout(db, shopNow.date) && auditReason.length < 3) {
+    posError("Enter a reason for adding a walk-in after today’s drawer was closed.");
+  }
+  const savedAppointment = await createAppointment({ db, bookingSource: "walk_in", customerId: customer?._id, recipientName: name, createdByUserId: barber._id, appointment: {
     name,
-    phone,
+    phone: customer?.phone ?? "",
     email: "",
+    customerId: customer?._id,
+    recipientName: name,
+    recipientType: "self",
     service: service.name,
     serviceId: service.id,
     price: service.price,
@@ -189,6 +251,8 @@ export async function checkoutPosWalkIn(formData: FormData) {
     status: "completed",
     visitType: "walk-in",
     source: "pos-walk-in",
+    bookingSource: "walk_in",
+    createdByUserId: barber._id,
     checkoutMethod: "cash",
     checkoutAmountCents: amountCents,
     commissionPercentageSnapshot: commissionPercentage,
@@ -198,6 +262,17 @@ export async function checkoutPosWalkIn(formData: FormData) {
     completedByStaffId: barber._id,
     createdAt: now,
     updatedAt: now,
+  } });
+  if (customer) await db.collection("customers").updateOne({ _id: customer._id }, { $set: { lastVisitAt: now, updatedAt: now } });
+  await recordPostCloseoutChange({
+    db,
+    businessDate: shopNow.date,
+    actor: barber,
+    entityType: "appointment",
+    entityId: savedAppointment._id,
+    summary: `${barber.name} added a walk-in checkout after closeout.`,
+    reason: auditReason,
+    changes: [{ field: "Cash total", before: "No sale", after: formatMoney(amountCents) }],
   });
 
   revalidatePath("/pos");
@@ -248,16 +323,16 @@ export async function updatePosAppointmentStatus(formData: FormData) {
 
 export async function cashOutBarberCommission(formData: FormData) {
   const payingBarber = await getCurrentPosBarber();
-  if (!payingBarber) posError("Your register session expired. Enter your PIN again.");
+  if (!payingBarber) posError("Your register session expired. Enter your PIN again.", "cashout");
 
   const barberId = value(formData, "barberId");
-  if (!ObjectId.isValid(barberId)) posError("Choose a valid barber payout.");
+  if (!ObjectId.isValid(barberId)) posError("Choose a valid barber payout.", "cashout");
 
   const client = await getMongoClient();
   const db = client.db("hqonmain");
   const targetId = new ObjectId(barberId);
   const target = await db.collection("staff").findOne({ _id: targetId, role: "barber" });
-  if (!target) posError("That barber could not be found.");
+  if (!target) posError("That barber could not be found.", "cashout");
 
   const businessDate = currentShopDateTime().date;
   const sales = await db.collection("appointments").find({
@@ -271,7 +346,7 @@ export async function cashOutBarberCommission(formData: FormData) {
     (total, sale) => total + Number(sale.commissionAmountCents ?? 0),
     0,
   );
-  if (earnedAmountCents <= 0) posError("There is no commission due to that barber today.");
+  if (earnedAmountCents <= 0) posError("There is no commission due to that barber today.", "cashout");
   const roundedPayoutCents = roundCashPayoutCents(earnedAmountCents);
 
   const payouts = db.collection<CommissionPayoutRecord>("commissionPayouts");
@@ -279,7 +354,11 @@ export async function cashOutBarberCommission(formData: FormData) {
   const existing = await payouts.findOne({ businessDate, barberId: targetId });
   const alreadyPaidCents = Number(existing?.paidAmountCents ?? 0);
   const dueAmountCents = Math.max(0, roundedPayoutCents - alreadyPaidCents);
-  if (dueAmountCents <= 0) posError(`${target.name} has already been cashed out for today.`);
+  if (dueAmountCents <= 0) posError(`${target.name} has already been cashed out for today.`, "cashout");
+  const auditReason = value(formData, "auditReason");
+  if (await hasDrawerCloseout(db, businessDate) && auditReason.length < 3) {
+    posError("Enter a reason for changing a barber payout after drawer closeout.", "cashout");
+  }
 
   const paidAt = new Date();
   const auditEntry = {
@@ -304,7 +383,7 @@ export async function cashOutBarberCommission(formData: FormData) {
           $push: { history: auditEntry },
         },
       );
-      if (!result.modifiedCount) posError("That payout changed on another register. Refresh and check again.");
+      if (!result.modifiedCount) posError("That payout changed on another register. Refresh and check again.", "cashout");
     } else {
       await payouts.insertOne({
         businessDate,
@@ -320,12 +399,112 @@ export async function cashOutBarberCommission(formData: FormData) {
     }
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && error.code === 11000) {
-      posError("That barber was just cashed out on another register. Refresh and check again.");
+      posError("That barber was just cashed out on another register. Refresh and check again.", "cashout");
+    }
+    throw error;
+  }
+
+  await recordPostCloseoutChange({
+    db,
+    businessDate,
+    actor: payingBarber,
+    entityType: "barber-payout",
+    entityId: targetId,
+    summary: `${target.name}'s payout changed after closeout.`,
+    reason: auditReason,
+    changes: [{
+      field: "Barber payout",
+      before: formatMoney(alreadyPaidCents),
+      after: formatMoney(alreadyPaidCents + dueAmountCents),
+    }],
+  });
+
+  revalidatePath("/pos");
+  revalidatePath("/admin/dashboard");
+  redirect(`/pos?view=cashout&notice=${encodeURIComponent(`${target.name} was cashed out ${formatWholeDollarMoney(dueAmountCents)}.`)}`);
+}
+
+export async function reconcileCashDrawer(formData: FormData) {
+  const closingBarber = await getCurrentPosBarber();
+  if (!closingBarber) posError("Your register session expired. Enter your PIN again.", "cashout");
+
+  const countedDrawerCents = parseMoneyToCents(value(formData, "countedAmount"));
+  if (countedDrawerCents === null) posError("Enter a valid cash total for the drawer.", "cashout");
+
+  const client = await getMongoClient();
+  const db = client.db("hqonmain");
+  const businessDate = currentShopDateTime().date;
+  const [sales, payouts, barbers] = await Promise.all([
+    db.collection("appointments").find({
+      requestedDate: businessDate,
+      status: "completed",
+      checkoutMethod: "cash",
+      checkoutAmountCents: { $type: "number" },
+    }).project({ checkoutAmountCents: 1, commissionAmountCents: 1, barberId: 1, barber: 1 }).toArray(),
+    db.collection<CommissionPayoutRecord>("commissionPayouts").find({ businessDate }).toArray(),
+    db.collection("staff").find({ role: "barber" }).project({ name: 1 }).toArray(),
+  ]);
+  const cashSalesCents = sales.reduce((total, sale) => total + Number(sale.checkoutAmountCents ?? 0), 0);
+  const barberPayoutsCents = payouts.reduce((total, payout) => total + Number(payout.paidAmountCents ?? 0), 0);
+  const paidByBarber = new Map(payouts.map((payout) => [payout.barberId.toString(), Number(payout.paidAmountCents ?? 0)]));
+  const unpaidPayout = barbers.some((barber) => {
+    const earned = sales
+      .filter((sale) => sale.barberId?.toString() === barber._id.toString() || sale.barber === barber.name)
+      .reduce((total, sale) => total + Number(sale.commissionAmountCents ?? 0), 0);
+    return roundCashPayoutCents(earned) > (paidByBarber.get(barber._id.toString()) ?? 0);
+  });
+  if (unpaidPayout) posError("Finish all barber payouts before saving the drawer closeout.", "cashout");
+
+  const openingDrawerCents = 20_000;
+  const hqRetainedCents = cashSalesCents - barberPayoutsCents;
+  const expectedDrawerCents = cashSalesCents;
+  const actualDrawerCents = countedDrawerCents + barberPayoutsCents - openingDrawerCents;
+  const expectedPhysicalDrawerCents = openingDrawerCents + hqRetainedCents;
+  const varianceCents = actualDrawerCents - expectedDrawerCents;
+  const reconciledAt = new Date();
+  const audit: DrawerCloseoutAudit = {
+    countedDrawerCents,
+    varianceCents,
+    reconciledAt,
+    reconciledByStaffId: closingBarber._id,
+    reconciledByName: closingBarber.name,
+  };
+  const closeouts = db.collection<DrawerCloseoutRecord>("drawerCloseouts");
+  await closeouts.createIndex({ businessDate: 1 }, { unique: true });
+  try {
+    await closeouts.insertOne({
+      businessDate,
+      openingDrawerCents,
+      targetDrawerCents: expectedPhysicalDrawerCents,
+      expectedDrawerCents,
+      actualDrawerCents,
+      expectedPhysicalDrawerCents,
+      cashSalesCents,
+      barberPayoutsCents,
+      hqRetainedCents,
+      countedDrawerCents,
+      varianceCents,
+      status: "closed",
+      reconciledAt,
+      reconciledByStaffId: closingBarber._id,
+      reconciledByName: closingBarber.name,
+      history: [audit],
+      createdAt: reconciledAt,
+      updatedAt: reconciledAt,
+    });
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === 11000) {
+      posError("Today’s drawer closeout is already saved. Financial history cannot be overwritten.", "cashout");
     }
     throw error;
   }
 
   revalidatePath("/pos");
   revalidatePath("/admin/dashboard");
-  redirect(`/pos?notice=${encodeURIComponent(`${target.name} was cashed out ${formatWholeDollarMoney(dueAmountCents)}.`)}`);
+  const result = varianceCents === 0
+    ? "Drawer closeout saved. The counted drawer matches the expected cash."
+    : varianceCents > 0
+      ? `Drawer closeout saved. The drawer is ${formatMoney(varianceCents)} over.`
+      : `Drawer closeout saved. The drawer is ${formatMoney(Math.abs(varianceCents))} short.`;
+  redirect(`/pos?view=cashout&notice=${encodeURIComponent(result)}`);
 }

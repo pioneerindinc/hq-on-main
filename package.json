@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:phone-identity": "node --test --test-isolation=none tests/phone-identity.test.mjs",
+    "migrate:customer-phone": "node --env-file=.env.local scripts/migrate-customer-phone-identity.mjs"
   },
   "dependencies": {
     "@vapi-ai/web": "^2.6.1",

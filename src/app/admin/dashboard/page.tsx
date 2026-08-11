@@ -5,24 +5,31 @@ import { ObjectId } from "mongodb";
 import {
   createAdminAppointment,
   createBarber,
+  createService,
   updateAdminAppointment,
   updateBarber,
+  updateService,
 } from "@/app/actions/staff";
+import { AdminServiceDeleteButton } from "@/components/admin-service-delete-button";
+import { BarberTotalsReport } from "@/components/barber-totals-report";
 import { StaffHeader } from "@/components/staff-header";
-import { RegisterPerformance } from "@/components/register-performance";
+import { StaffCustomerFields } from "@/components/staff-customer-fields";
 import { getStaffCollection, requireStaffRole } from "@/lib/auth";
+import {
+  type BarberTotalsPayout,
+  type BarberTotalsSale,
+  buildBarberTotalsReport,
+  normalizeTotalsDate,
+  normalizeTotalsPeriod,
+  totalsRange,
+} from "@/lib/barber-totals";
 import { currentShopDateTime, displayTime, formatDisplayDate, normalizeTime } from "@/lib/booking";
 import { barberPhotoUrl } from "@/lib/barber-profile";
 import { getCustomerCollection } from "@/lib/customer-auth";
 import { getMongoClient } from "@/lib/mongodb";
 import { formatMoney, formatWholeDollarMoney, roundCashPayoutCents } from "@/lib/money";
-import {
-  type PerformancePayout,
-  type PerformanceSale,
-  buildPerformancePeriods,
-  performanceRangeStart,
-} from "@/lib/register-performance";
-import { SERVICE_CATALOG } from "@/lib/services";
+import { customerDisplayName, formatPhone } from "@/lib/phone";
+import { getServiceCatalog } from "@/lib/services";
 
 export const metadata: Metadata = {
   title: "Admin Dashboard | HQ on Main",
@@ -32,23 +39,24 @@ export const metadata: Metadata = {
 const adminTabs = [
   { id: "add-barber", label: "Add barber", description: "Create team access" },
   { id: "barbers", label: "Manage barbers", description: "Profiles and access" },
+  { id: "services", label: "Services", description: "Menu and pricing" },
   { id: "add-appointment", label: "Add appointment", description: "Create a booking" },
   { id: "appointments", label: "Appointments", description: "View and edit bookings" },
-  { id: "customers", label: "Customers", description: "Registered accounts" },
+  { id: "customers", label: "Customers", description: "Customer records and identity status" },
   { id: "calls", label: "Booking calls", description: "Events and outcomes" },
   { id: "register", label: "Daily register", description: "Cash and commissions" },
   { id: "performance", label: "Performance", description: "Barber totals and visits" },  
 ] as const;
 type AdminTab = (typeof adminTabs)[number]["id"];
 
-type PerformanceSaleRecord = PerformanceSale & {
+type PerformanceSaleRecord = BarberTotalsSale & {
   barberId?: ObjectId;
   barber?: string;
   status?: string;
   checkoutMethod?: string;
 };
 
-type PerformancePayoutRecord = PerformancePayout & {
+type PerformancePayoutRecord = BarberTotalsPayout & {
   barberId?: ObjectId;
   barberName?: string;
 };
@@ -88,6 +96,33 @@ type VoiceCallRecord = {
   updatedAt?: Date;
 };
 
+type DrawerCloseoutRecord = {
+  businessDate: string;
+  openingDrawerCents?: number;
+  expectedDrawerCents?: number;
+  actualDrawerCents?: number;
+  expectedPhysicalDrawerCents?: number;
+  targetDrawerCents?: number;
+  cashSalesCents?: number;
+  barberPayoutsCents?: number;
+  hqRetainedCents?: number;
+  countedDrawerCents?: number;
+  varianceCents?: number;
+  reconciledByName?: string;
+  reconciledAt?: Date;
+  status?: string;
+};
+
+type FinancialAuditEventRecord = {
+  _id: ObjectId;
+  businessDate: string;
+  summary?: string;
+  reason?: string;
+  changedByName?: string;
+  changedAt?: Date;
+  changes?: Array<{ field?: string; before?: string; after?: string }>;
+};
+
 function isAdminTab(value?: string): value is AdminTab {
   return adminTabs.some((tab) => tab.id === value);
 }
@@ -116,6 +151,15 @@ function formatCallDuration(seconds?: number) {
 
 function formatCallCost(cost?: number) {
   return typeof cost === "number" ? `$${cost.toFixed(2)}` : "Not available";
+}
+
+function formatAuditTime(value?: Date) {
+  if (!value) return "Not available";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: process.env.BARBERSHOP_TIME_ZONE || "America/Indiana/Indianapolis",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(value);
 }
 
 function formatCallerNumber(phone?: string) {
@@ -152,17 +196,22 @@ function safeCallUrl(value?: string) {
 export default async function AdminDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; tab?: string; customer?: string; call?: string }>;
+  searchParams: Promise<{ error?: string; tab?: string; customer?: string; call?: string; period?: string; date?: string; barber?: string; registerDate?: string }>;
 }) {
   const admin = await requireStaffRole("admin");
-  const { error, tab, customer: selectedCustomerId, call: selectedCallId } = await searchParams;
+  const { error, tab, customer: selectedCustomerId, call: selectedCallId, period, date, barber: performanceBarberId, registerDate } = await searchParams;
   const staff = await getStaffCollection();
   const customersCollection = await getCustomerCollection();
   const client = await getMongoClient();
   const db = client.db("hqonmain");
+  const serviceCatalog = await getServiceCatalog();
   const businessDate = currentShopDateTime().date;
-  const performanceStart = performanceRangeStart(businessDate);
-  const [barbers, customers, appointments, appointmentCount, registerSales, registerPayouts, performanceSales, performancePayouts, voiceCalls, voiceCallCount, voiceInProgressCount, voiceBookedAppointmentCount] = await Promise.all([
+  const selectedRegisterDate = normalizeTotalsDate(registerDate, businessDate);
+  const selectedRegisterRange = totalsRange("day", selectedRegisterDate);
+  const selectedPerformancePeriod = normalizeTotalsPeriod(period);
+  const selectedPerformanceDate = normalizeTotalsDate(date, businessDate);
+  const selectedPerformanceRange = totalsRange(selectedPerformancePeriod, selectedPerformanceDate);
+  const [barbers, customers, appointments, appointmentCount, registerSales, registerPayouts, registerCloseout, registerAuditEvents, voiceCalls, voiceCallCount, voiceInProgressCount, voiceBookedAppointmentCount] = await Promise.all([
     staff.find({ role: "barber" }).sort({ active: -1, name: 1 }).toArray(),
     customersCollection.find({}).sort({ createdAt: -1 }).limit(250).toArray(),
     db.collection("appointments")
@@ -172,30 +221,45 @@ export default async function AdminDashboard({
       .toArray(),
     db.collection("appointments").countDocuments(),
     db.collection("appointments").find({
-      requestedDate: businessDate,
+      requestedDate: selectedRegisterDate,
       status: "completed",
       checkoutMethod: "cash",
       checkoutAmountCents: { $gte: 0 },
     }).toArray(),
-    db.collection("commissionPayouts").find({ businessDate }).toArray(),
-    db.collection<PerformanceSaleRecord>("appointments").find({
-      requestedDate: { $gte: performanceStart, $lte: businessDate },
-      status: "completed",
-      checkoutMethod: "cash",
-      checkoutAmountCents: { $gte: 0 },
-    }).toArray(),
-    db.collection<PerformancePayoutRecord>("commissionPayouts").find({
-      businessDate: { $gte: performanceStart, $lte: businessDate },
-    }).toArray(),
+    db.collection("commissionPayouts").find({ businessDate: selectedRegisterDate }).toArray(),
+    db.collection<DrawerCloseoutRecord>("drawerCloseouts").findOne({ businessDate: selectedRegisterDate }),
+    db.collection<FinancialAuditEventRecord>("financialAuditEvents").find({ businessDate: selectedRegisterDate }).sort({ changedAt: 1 }).toArray(),
     db.collection<VoiceCallRecord>("voiceCalls").find({}).sort({ updatedAt: -1 }).limit(150).toArray(),
     db.collection("voiceCalls").countDocuments(),
     db.collection("voiceCalls").countDocuments({ status: "in-progress" }),
     db.collection("appointments").countDocuments({ source: "voice" }),
   ]);
+  const selectedPerformanceBarber = performanceBarberId && ObjectId.isValid(performanceBarberId)
+    ? barbers.find((barber) => barber._id.toString() === performanceBarberId) ?? null
+    : null;
+  const performanceAppointmentFilter = selectedPerformanceBarber
+    ? { $or: [{ barberId: selectedPerformanceBarber._id }, { barber: selectedPerformanceBarber.name }] }
+    : {};
+  const performancePayoutFilter = selectedPerformanceBarber
+    ? { $or: [{ barberId: selectedPerformanceBarber._id }, { barberName: selectedPerformanceBarber.name }] }
+    : {};
+  const [performanceSales, performancePayouts] = await Promise.all([
+    db.collection<PerformanceSaleRecord>("appointments").find({
+      ...performanceAppointmentFilter,
+      requestedDate: { $gte: selectedPerformanceRange.start, $lte: selectedPerformanceRange.end },
+      status: "completed",
+      checkoutMethod: "cash",
+      checkoutAmountCents: { $gte: 0 },
+    }).toArray(),
+    db.collection<PerformancePayoutRecord>("commissionPayouts").find({
+      ...performancePayoutFilter,
+      businessDate: { $gte: selectedPerformanceRange.start, $lte: selectedPerformanceRange.end },
+    }).toArray(),
+  ]);
   const appointmentCounts = await Promise.all(
     customers.map((customer) =>
       db.collection("appointments").countDocuments({
-        $or: [{ customerId: customer._id }, { email: customer.email }],
+        customerId: customer._id,
       }),
     ),
   );
@@ -204,7 +268,7 @@ export default async function AdminDashboard({
     : null;
   const selectedCustomerAppointments = selectedCustomer
     ? await db.collection("appointments").find({
-        $or: [{ customerId: selectedCustomer._id }, { email: selectedCustomer.email }],
+        customerId: selectedCustomer._id,
       }).sort({ requestedDate: -1, requestedTime: -1 }).toArray()
     : [];
   const selectedCall = selectedCallId && selectedCallId.length <= 200
@@ -232,15 +296,12 @@ export default async function AdminDashboard({
     { total: 0, completed: 0, noShow: 0, cancelled: 0 },
   );
   const activeTab: AdminTab = isAdminTab(tab) ? tab : "barbers";
-  const performanceByBarber = new Map(barbers.map((barber) => {
-    const sales = performanceSales.filter((sale) =>
-      sale.barberId?.toString() === barber._id.toString() || sale.barber === barber.name,
-    );
-    const payouts = performancePayouts.filter((payout) =>
-      payout.barberId?.toString() === barber._id.toString() || payout.barberName === barber.name,
-    );
-    return [barber._id.toString(), buildPerformancePeriods(sales, payouts, businessDate)];
-  }));
+  const performanceReport = buildBarberTotalsReport(
+    performanceSales,
+    performancePayouts,
+    selectedPerformanceRange,
+    businessDate,
+  );
   const paidByBarber = new Map(
     registerPayouts.map((payout) => [String(payout.barberId ?? ""), Number(payout.paidAmountCents ?? 0)]),
   );
@@ -273,6 +334,23 @@ export default async function AdminDashboard({
     }),
     { count: 0, gross: 0, commission: 0, paid: 0, due: 0, shop: 0 },
   );
+  const closeoutExpectedCents = Number(
+    (typeof registerCloseout?.actualDrawerCents === "number" ? registerCloseout.expectedDrawerCents : registerCloseout?.cashSalesCents) ??
+    registerCloseout?.expectedDrawerCents ??
+    0,
+  );
+  const closeoutActualCents = Number(
+    registerCloseout?.actualDrawerCents ??
+    ((registerCloseout?.countedDrawerCents ?? 0) +
+      (registerCloseout?.barberPayoutsCents ?? 0) -
+      (registerCloseout?.openingDrawerCents ?? 20_000)),
+  );
+  const closeoutVarianceCents = Number(registerCloseout?.varianceCents ?? (closeoutActualCents - closeoutExpectedCents));
+  const closeoutPayoutCents = Number(registerCloseout?.barberPayoutsCents ?? 0);
+  const closeoutHqRetainedCents = Number(
+    registerCloseout?.hqRetainedCents ??
+    ((registerCloseout?.cashSalesCents ?? 0) - closeoutPayoutCents),
+  );
   const voiceAppointmentByCall = new Map(
     appointments
       .filter((appointment) => typeof appointment.voiceCallId === "string")
@@ -291,7 +369,11 @@ export default async function AdminDashboard({
 
   return (
     <main className="portal-page">
-      <StaffHeader name={admin.name} area="Admin" />
+      <StaffHeader
+        name={admin.name}
+        area="Admin"
+        alternatePortal={admin.role === "barber" ? { href: "/barber/dashboard", label: "Barber portal" } : undefined}
+      />
       <div className="container portal-content">
         <section className="portal-title">
           <div><p className="eyebrow">Management workspace</p><h1>Run the shop.</h1></div>
@@ -343,6 +425,10 @@ export default async function AdminDashboard({
                   <label className="portal-wide">Bio<textarea name="bio" rows={5} maxLength={1200} placeholder="Tell customers about this barber, their approach, and specialties." /></label>
                   <label className="portal-wide">Profile photo<input name="photo" type="file" accept="image/jpeg,image/png,image/webp" /><small>Square JPEG, PNG, or WebP recommended. Maximum 3 MB.</small></label>
                   <label className="account-check portal-wide">
+                    <input name="adminAccess" type="checkbox" />
+                    <span>Grant this barber full admin portal access. They will be able to manage barbers, customers, appointments, services, register reports, and other administrative settings.</span>
+                  </label>
+                  <label className="account-check portal-wide">
                     <input name="smsNotificationsEnabled" type="checkbox" />
                     <span>The barber agreed to receive automated HQ on Main texts for new and cancelled appointments. Frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or HELP for help.</span>
                   </label>
@@ -368,7 +454,7 @@ export default async function AdminDashboard({
                             <Image src={barberPhotoUrl(barber._id.toString(), barber.photoUpdatedAt)} alt="" width={64} height={64} />
                           ) : barber.name.slice(0, 1)}
                         </span>
-                        <div><h3>{barber.name}</h3><p>{barber.active ? "Active" : "Inactive"}</p></div>
+                        <div><h3>{barber.name}</h3><p>{barber.active ? "Active" : "Inactive"}{barber.adminAccess ? " · Admin access" : ""}</p></div>
                       </div>
                       <div className="staff-edit-grid">
                         <label>Name<input name="name" defaultValue={barber.name} required /></label>
@@ -405,11 +491,51 @@ export default async function AdminDashboard({
                           </label>
                         )}
                         <label className="account-check portal-wide">
+                          <input name="adminAccess" type="checkbox" defaultChecked={barber.adminAccess === true} />
+                          <span>Grant this barber full admin portal access. They will retain their barber dashboard and POS access.</span>
+                        </label>
+                        <label className="account-check portal-wide">
                           <input name="smsNotificationsEnabled" type="checkbox" defaultChecked={barber.smsNotificationsEnabled === true} />
                           <span>The barber agreed to receive automated HQ on Main texts for new and cancelled appointments. Frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or HELP for help.</span>
                         </label>
                       </div>
                       <button className="portal-save" type="submit">Save changes</button>
+                    </form>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {activeTab === "services" && (
+              <section className="portal-section">
+                <div className="portal-section-heading">
+                  <div><h2>Services</h2></div>
+                  <p>Edit the menu used by online booking, barbers, POS, and the voice assistant.</p>
+                </div>
+                <form className="admin-service-create" action={createService}>
+                  <div className="admin-service-create-heading">
+                    <div><small>New menu item</small><h3>Add a service</h3></div>
+                    <p>New services become available for barbers to select after they are added.</p>
+                  </div>
+                  <label>Service name<input name="name" required minLength={2} maxLength={100} placeholder="Example: Head shave" /></label>
+                  <label>Price<input name="price" required maxLength={20} placeholder="$35 or TBD" /></label>
+                  <label className="portal-wide">Description<textarea name="description" required minLength={2} maxLength={600} rows={3} placeholder="Describe what is included." /></label>
+                  <button className="button button-primary portal-wide" type="submit">Add service</button>
+                </form>
+                <div className="admin-service-list">
+                  {serviceCatalog.map((service, index) => (
+                    <form className="admin-service-card" action={updateService} key={service.id}>
+                      <input type="hidden" name="serviceId" value={service.id} />
+                      <div className="admin-service-card-number">{String(index + 1).padStart(2, "0")}</div>
+                      <div className="admin-service-fields">
+                        <label>Service name<input name="name" defaultValue={service.name} required minLength={2} maxLength={100} /></label>
+                        <label>Price<input name="price" defaultValue={service.price} required maxLength={20} /></label>
+                        <label className="portal-wide">Description<textarea name="description" defaultValue={service.description} required minLength={2} maxLength={600} rows={3} /></label>
+                      </div>
+                      <div className="admin-service-actions">
+                        <AdminServiceDeleteButton serviceName={service.name} />
+                        <button className="portal-save" type="submit">Save changes</button>
+                      </div>
                     </form>
                   ))}
                 </div>
@@ -423,9 +549,10 @@ export default async function AdminDashboard({
                   <p>Create a phone, walk-in, or staff-assisted booking.</p>
                 </div>
                 <form className="portal-form portal-form-grid" action={createAdminAppointment}>
-                  <label>Guest name<input name="name" required minLength={2} /></label>
-                  <label>Phone<input name="phone" type="tel" required /></label>
-                  <label>Email<input name="email" type="email" required /></label>
+                  <StaffCustomerFields />
+                  <label>Booking source
+                    <select name="bookingSource" defaultValue="staff"><option value="staff">In shop / staff</option><option value="phone">Phone call</option></select>
+                  </label>
                   <label>Visit type
                     <select name="visitType" defaultValue="appointment" required>
                       <option value="appointment">Appointment</option>
@@ -443,7 +570,7 @@ export default async function AdminDashboard({
                   <label>Service
                     <select name="service" required defaultValue="">
                       <option value="" disabled>Select service</option>
-                      {SERVICE_CATALOG.map((service) => <option key={service.id}>{service.name}</option>)}
+                      {serviceCatalog.map((service) => <option key={service.id}>{service.name}</option>)}
                     </select>
                   </label>
                   <label>Status
@@ -487,7 +614,7 @@ export default async function AdminDashboard({
                         <div className="admin-appointment-fields">
                           <label>Guest name<input name="name" defaultValue={String(appointment.name ?? "")} required /></label>
                           <label>Phone<input name="phone" type="tel" defaultValue={String(appointment.phone ?? "")} required /></label>
-                          <label>Email<input name="email" type="email" defaultValue={String(appointment.email ?? "")} required /></label>
+                          <label>Email <small>Optional</small><input name="email" type="email" defaultValue={String(appointment.email ?? "")} /></label>
                           <label>Visit type
                             <select name="visitType" defaultValue={String(appointment.visitType ?? (appointment.source === "walk-in" ? "walk-in" : "appointment"))} required>
                               <option value="appointment">Appointment</option>
@@ -504,7 +631,10 @@ export default async function AdminDashboard({
                           </label>
                           <label>Service
                             <select name="service" defaultValue={String(appointment.service ?? "")} required>
-                              {SERVICE_CATALOG.map((service) => <option key={service.id}>{service.name}</option>)}
+                              {!serviceCatalog.some((service) => service.name === String(appointment.service ?? "")) && (
+                                <option>{String(appointment.service ?? "Service not specified")}</option>
+                              )}
+                              {serviceCatalog.map((service) => <option key={service.id}>{service.name}</option>)}
                             </select>
                           </label>
                           <label>Status
@@ -515,7 +645,15 @@ export default async function AdminDashboard({
                           </label>
                           <label>Date<input name="date" type="date" defaultValue={String(appointment.requestedDate ?? "")} required /></label>
                           <label>Time<input name="time" type="time" defaultValue={normalizeTime(String(appointment.requestedTime ?? ""))} required /></label>
+                          {typeof appointment.checkoutAmountCents === "number" && (
+                            <label>Cash total<input name="checkoutAmount" type="number" min="0.01" max="100000" step="0.01" defaultValue={(appointment.checkoutAmountCents / 100).toFixed(2)} required /></label>
+                          )}
                           <label className="portal-wide">Notes<input name="notes" defaultValue={String(appointment.notes ?? "")} /></label>
+                          {typeof appointment.checkoutAmountCents === "number" && (
+                            <label className="portal-wide">Correction reason
+                              <input name="auditReason" maxLength={300} placeholder="Required when changing a transaction after drawer closeout" />
+                            </label>
+                          )}
                         </div>
                         <button className="portal-save" type="submit">Save appointment</button>
                       </form>
@@ -532,10 +670,11 @@ export default async function AdminDashboard({
                     <Link className="admin-customer-back" href="/admin/dashboard?tab=customers">← Back to all customers</Link>
                     <div className="admin-customer-detail-heading">
                       <div className="admin-customer-person">
-                        <span>{selectedCustomer.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
+                        <span>{customerDisplayName(selectedCustomer).split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
                         <div>
                           <p className="eyebrow">Customer history</p>
-                          <h2>{selectedCustomer.name}</h2>
+                          <h2>{customerDisplayName(selectedCustomer)}</h2>
+                          <p>{selectedCustomer.phoneVerifiedAt ? "Verified mobile" : "Phone not verified"} · Created via {String(selectedCustomer.createdBySource ?? "legacy").replaceAll("_", " ")}{selectedCustomer.possibleDuplicate ? " · Possible duplicate" : ""}</p>
                           <p>{selectedCustomer.email} · {selectedCustomer.phone}</p>
                         </div>
                       </div>
@@ -571,11 +710,11 @@ export default async function AdminDashboard({
                 ) : (
                   <>
                     <div className="portal-section-heading">
-                      <div><h2>Customer accounts</h2></div>
-                      <p>Choose a customer to see their complete appointment history.</p>
+                      <div><h2>Customer records</h2></div>
+                      <p>Choose a customer to see identity status and appointment history.</p>
                     </div>
                     <div className="admin-customer-list">
-                      {customers.length === 0 && <p className="portal-empty">No registered customer accounts yet.</p>}
+                      {customers.length === 0 && <p className="portal-empty">No customer records yet.</p>}
                       {customers.map((customer, index) => (
                         <Link
                           className="admin-customer-card"
@@ -584,12 +723,12 @@ export default async function AdminDashboard({
                           key={customer._id.toString()}
                         >
                           <div className="admin-customer-person">
-                            <span>{customer.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
-                            <div><h3>{customer.name}</h3><p>Joined {formatDisplayDate(customer.createdAt)}</p></div>
+                            <span>{customerDisplayName(customer).split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
+                            <div><h3>{customerDisplayName(customer)}</h3><p>{customer.phoneVerifiedAt ? "Verified mobile" : "Phone not verified"} · {String(customer.createdBySource ?? "legacy").replaceAll("_", " ")}{customer.possibleDuplicate ? " · Review duplicate" : ""}</p></div>
                           </div>
                           <dl>
-                            <div><dt>Email</dt><dd>{customer.email}</dd></div>
-                            <div><dt>Phone</dt><dd>{customer.phone}</dd></div>
+                            <div><dt>Email</dt><dd>{customer.email || "Not provided"}</dd></div>
+                            <div><dt>Phone</dt><dd>{formatPhone(customer.phone)}</dd></div>
                             <div><dt>Appointments</dt><dd>{appointmentCounts[index]}</dd></div>
                           </dl>
                         </Link>
@@ -760,8 +899,77 @@ export default async function AdminDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Daily register</h2></div>
-                  <p>{formatDisplayDate(businessDate)} · Rounded payouts and shop pay.</p>
+                  <p>{formatDisplayDate(selectedRegisterDate)} · Rounded payouts and shop pay.</p>
                 </div>
+                <div className="admin-register-date-controls">
+                  <Link
+                    href={`/admin/dashboard?tab=register&registerDate=${selectedRegisterRange.previousAnchor}`}
+                    aria-label="View previous day's closeout"
+                  >
+                    ←
+                  </Link>
+                  <form method="get" action="/admin/dashboard">
+                    <input type="hidden" name="tab" value="register" />
+                    <label>
+                      Closeout date
+                      <input name="registerDate" type="date" defaultValue={selectedRegisterDate} max={businessDate} />
+                    </label>
+                    <button type="submit">View closeout</button>
+                  </form>
+                  {selectedRegisterRange.nextAnchor <= businessDate ? (
+                    <Link
+                      href={`/admin/dashboard?tab=register&registerDate=${selectedRegisterRange.nextAnchor}`}
+                      aria-label="View next day's closeout"
+                    >
+                      →
+                    </Link>
+                  ) : (
+                    <span aria-hidden="true">→</span>
+                  )}
+                </div>
+                {registerCloseout ? (
+                  <section className={`admin-closeout-audit ${closeoutVarianceCents === 0 ? "balanced" : "variance"}`} aria-labelledby="closeout-audit-heading">
+                    <header>
+                      <div><small>Immutable closeout record</small><h3 id="closeout-audit-heading">Drawer audit</h3><p>Expected and actual drawer totals reflect the day&apos;s cash activity; the $200 opening float is excluded.</p></div>
+                      <span>{registerAuditEvents.length ? "Review changes" : "Closed"}</span>
+                    </header>
+                    <dl className="admin-closeout-facts">
+                      <div><dt>Date</dt><dd>{formatDisplayDate(registerCloseout.businessDate)}</dd></div>
+                      <div><dt>Closed by</dt><dd>{registerCloseout.reconciledByName || "Staff"}</dd></div>
+                      <div><dt>Time</dt><dd>{formatAuditTime(registerCloseout.reconciledAt)}</dd></div>
+                      <div><dt>Expected drawer</dt><dd>{formatMoney(closeoutExpectedCents)}</dd></div>
+                      <div><dt>Actual drawer</dt><dd>{formatMoney(closeoutActualCents)}</dd></div>
+                      <div className="variance"><dt>Variance</dt><dd>{closeoutVarianceCents > 0 ? "+" : ""}{formatMoney(closeoutVarianceCents)}</dd></div>
+                      <div><dt>Barber payouts</dt><dd>{formatMoney(closeoutPayoutCents)}</dd></div>
+                      <div><dt>HQ retained</dt><dd>{formatMoney(closeoutHqRetainedCents)}</dd></div>
+                      <div><dt>Status</dt><dd>Closed</dd></div>
+                    </dl>
+                    <div className="admin-financial-audit-log">
+                      <div className="admin-financial-audit-heading">
+                        <div><h4>Changes after closeout</h4><p>The original closeout above is never recalculated or overwritten.</p></div>
+                        <strong>{registerAuditEvents.length}</strong>
+                      </div>
+                      {registerAuditEvents.length ? registerAuditEvents.map((event) => (
+                        <article key={event._id.toString()}>
+                          <div className="admin-audit-event-meta">
+                            <strong>{event.summary || "Financial record changed"}</strong>
+                            <span>Changed by {event.changedByName || "Staff"} · {formatAuditTime(event.changedAt)}</span>
+                          </div>
+                          <div className="admin-audit-changes">
+                            {(event.changes ?? []).map((change, index) => (
+                              <p key={`${event._id.toString()}-${index}`}><small>{change.field || "Value"}</small><span>{change.before || "—"}</span><b>→</b><strong>{change.after || "—"}</strong></p>
+                            ))}
+                          </div>
+                          <p className="admin-audit-reason"><small>Reason</small>{event.reason || "No reason recorded"}</p>
+                        </article>
+                      )) : (
+                        <p className="portal-empty">No financial records have changed since this drawer was closed.</p>
+                      )}
+                    </div>
+                  </section>
+                ) : (
+                  <p className="admin-closeout-empty">No drawer closeout has been saved for {formatDisplayDate(selectedRegisterDate)}.</p>
+                )}
                 <div className="admin-register-totals">
                   <div><small>Cash collected</small><strong>{formatMoney(registerTotals.gross)}</strong></div>
                   <div><small>Rounded payout due</small><strong>{formatWholeDollarMoney(registerTotals.due)}</strong></div>
@@ -789,19 +997,35 @@ export default async function AdminDashboard({
             {activeTab === "performance" && (
               <section className="portal-section">
                 <div className="portal-section-heading">
-                  <div><h2>Barber performance</h2></div>
-                  <p>Completed cash sales, payouts, appointments, and walk-ins.</p>
+                  <div><h2>{selectedPerformanceBarber ? `${selectedPerformanceBarber.name}'s performance` : "Shop performance"}</h2></div>
+                  <p>Browse any barber or the whole shop by day, week, or month.</p>
                 </div>
-                <div className="admin-performance-list">
-                  {barbers.map((barber) => (
-                    <article className="admin-performance-barber" key={barber._id.toString()}>
-                      <header>
-                        <div><h3>{barber.name}</h3><p>{barber.active ? "Active barber" : "Inactive barber"}</p></div>
-                      </header>
-                      <RegisterPerformance periods={performanceByBarber.get(barber._id.toString()) ?? []} />
-                    </article>
-                  ))}
-                </div>
+                <form className="admin-performance-scope" method="get" action="/admin/dashboard">
+                  <input type="hidden" name="tab" value="performance" />
+                  <input type="hidden" name="period" value={selectedPerformancePeriod} />
+                  <input type="hidden" name="date" value={selectedPerformanceDate} />
+                  <label>Whose totals?
+                    <select name="barber" defaultValue={selectedPerformanceBarber?._id.toString() ?? ""}>
+                      <option value="">Whole shop</option>
+                      {barbers.map((barber) => (
+                        <option value={barber._id.toString()} key={barber._id.toString()}>
+                          {barber.name}{barber.active ? "" : " (inactive)"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button type="submit">View report</button>
+                </form>
+                <BarberTotalsReport
+                  report={performanceReport}
+                  today={businessDate}
+                  basePath="/admin/dashboard"
+                  fixedParams={{
+                    tab: "performance",
+                    ...(selectedPerformanceBarber ? { barber: selectedPerformanceBarber._id.toString() } : {}),
+                  }}
+                  showBarber={!selectedPerformanceBarber}
+                />
               </section>
             )}
           </div>

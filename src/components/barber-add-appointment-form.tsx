@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { addBarberAppointment } from "@/app/actions/staff";
+import { StaffCustomerFields } from "@/components/staff-customer-fields";
 import {
   dayNumber,
   displayTime,
@@ -60,9 +61,10 @@ export function BarberAddAppointmentForm({
 
   return (
     <form className="portal-form portal-form-grid" action={addBarberAppointment}>
-      <label>Guest name<input name="name" required /></label>
-      <label>Phone<input name="phone" type="tel" required /></label>
-      <label>Email<input name="email" type="email" required /></label>
+      <StaffCustomerFields />
+      <label>Booking source
+        <select name="bookingSource" defaultValue="staff"><option value="staff">In shop / staff</option><option value="phone">Phone call</option></select>
+      </label>
       <label>Visit type
         <select name="visitType" defaultValue="appointment" required>
           <option value="appointment">Appointment</option>
