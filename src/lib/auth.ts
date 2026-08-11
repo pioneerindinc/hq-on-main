@@ -36,7 +36,8 @@ export type StaffRecord = {
   services?: string[];
   commissionPercentage?: number;
   posPinHash?: string;
-  passwordHash: string;
+  passwordHash?: string;
+  credentialsConfiguredAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -54,7 +55,8 @@ export async function hashPassword(password: string) {
   return `scrypt$${salt}$${derived.toString("hex")}`;
 }
 
-export async function verifyPassword(password: string, stored: string) {
+export async function verifyPassword(password: string, stored?: string) {
+  if (!stored) return false;
   const [algorithm, salt, key] = stored.split("$");
   if (algorithm !== "scrypt" || !salt || !key) return false;
 

@@ -35,6 +35,9 @@ export async function login(formData: FormData) {
       : { email, role: "barber" },
   );
 
+  if (staff?.active && !staff.passwordHash) {
+    loginError(role, "Your account setup is not complete. Ask an administrator for a new setup link.");
+  }
   if (!staff || !staff.active || !(await verifyPassword(password, staff.passwordHash))) {
     loginError(role, "Email or password is incorrect.");
   }

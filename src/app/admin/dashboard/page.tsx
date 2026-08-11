@@ -5,6 +5,7 @@ import { ObjectId } from "mongodb";
 import {
   createAdminAppointment,
   createBarber,
+  createBarberCredentialReset,
   createService,
   updateAdminAppointment,
   updateBarber,
@@ -12,6 +13,7 @@ import {
 } from "@/app/actions/staff";
 import { AdminServiceDeleteButton } from "@/components/admin-service-delete-button";
 import { BarberTotalsReport } from "@/components/barber-totals-report";
+import { BarberSetupLink } from "@/components/barber-setup-link";
 import { StaffHeader } from "@/components/staff-header";
 import { StaffCustomerFields } from "@/components/staff-customer-fields";
 import { getStaffCollection, requireStaffRole } from "@/lib/auth";
@@ -196,10 +198,10 @@ function safeCallUrl(value?: string) {
 export default async function AdminDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; tab?: string; customer?: string; call?: string; period?: string; date?: string; barber?: string; registerDate?: string }>;
+  searchParams: Promise<{ error?: string; tab?: string; customer?: string; call?: string; period?: string; date?: string; barber?: string; registerDate?: string; invite?: string; inviteBarber?: string }>;
 }) {
   const admin = await requireStaffRole("admin");
-  const { error, tab, customer: selectedCustomerId, call: selectedCallId, period, date, barber: performanceBarberId, registerDate } = await searchParams;
+  const { error, tab, customer: selectedCustomerId, call: selectedCallId, period, date, barber: performanceBarberId, registerDate, invite, inviteBarber } = await searchParams;
   const staff = await getStaffCollection();
   const customersCollection = await getCustomerCollection();
   const client = await getMongoClient();
@@ -384,6 +386,7 @@ export default async function AdminDashboard({
           </div>
         </section>
         {error && <p className="portal-alert error" role="alert">{error}</p>}
+        {invite && <BarberSetupLink token={invite} barberName={inviteBarber || "the barber"} />}
 
         <div className="barber-workspace admin-workspace">
           <aside className="portal-sidebar" aria-label="Admin dashboard sections">
@@ -411,28 +414,22 @@ export default async function AdminDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Add a barber</h2></div>
-                  <p>Create login access and a staff profile.</p>
+                  <p>Create the staff profile, then privately share the one-time setup link.</p>
                 </div>
                 <form className="portal-form portal-form-grid" action={createBarber}>
                   <label>Full name<input name="name" required minLength={2} /></label>
                   <label>Email<input name="email" type="email" required /></label>
-                  <label>Mobile phone<input name="phone" type="tel" placeholder="(317) 555-0123" /></label>
                   <label>Nickname<input name="nickname" maxLength={60} placeholder="Optional public nickname" /></label>
                   <label>Specialty<input name="specialty" maxLength={120} placeholder="Fades, beard work, classic cuts" /></label>
-                  <label>Temporary password<input name="password" type="password" required minLength={10} autoComplete="new-password" /></label>
                   <label>Commission percentage<input name="commissionPercentage" type="number" min="0" max="100" step="0.1" required /></label>
-                  <label>POS PIN<input name="posPin" type="password" inputMode="numeric" pattern="[0-9]{4,6}" minLength={4} maxLength={6} required autoComplete="new-password" /></label>
                   <label className="portal-wide">Bio<textarea name="bio" rows={5} maxLength={1200} placeholder="Tell customers about this barber, their approach, and specialties." /></label>
                   <label className="portal-wide">Profile photo<input name="photo" type="file" accept="image/jpeg,image/png,image/webp" /><small>Square JPEG, PNG, or WebP recommended. Maximum 3 MB.</small></label>
                   <label className="account-check portal-wide">
                     <input name="adminAccess" type="checkbox" />
                     <span>Grant this barber full admin portal access. They will be able to manage barbers, customers, appointments, services, register reports, and other administrative settings.</span>
                   </label>
-                  <label className="account-check portal-wide">
-                    <input name="smsNotificationsEnabled" type="checkbox" />
-                    <span>The barber agreed to receive automated HQ on Main texts for new and cancelled appointments. Frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or HELP for help.</span>
-                  </label>
-                  <button className="button button-primary portal-wide" type="submit">Add barber account</button>
+                  <p className="portal-wide portal-form-note">After saving, you&apos;ll receive a one-time link for the barber to choose their password, POS PIN, phone number, and notification preference.</p>
+                  <button className="button button-primary portal-wide" type="submit">Add barber and create setup link</button>
                 </form>
               </section>
             )}
@@ -441,7 +438,7 @@ export default async function AdminDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Manage barbers</h2></div>
-                  <p>Edit profiles, reset passwords, or deactivate access.</p>
+                  <p>Edit shop-controlled profile details, issue credential reset links, or deactivate access.</p>
                 </div>
                 <div className="staff-list">
                   {barbers.length === 0 && <p className="portal-empty">No barber accounts yet.</p>}
@@ -459,7 +456,6 @@ export default async function AdminDashboard({
                       <div className="staff-edit-grid">
                         <label>Name<input name="name" defaultValue={barber.name} required /></label>
                         <label>Email<input name="email" type="email" defaultValue={barber.email} required /></label>
-                        <label>Mobile phone<input name="phone" type="tel" defaultValue={barber.phone ?? ""} placeholder="(317) 555-0123" /></label>
                         <label>Nickname<input name="nickname" maxLength={60} defaultValue={barber.nickname ?? ""} placeholder="Optional public nickname" /></label>
                         <label>Specialty<input name="specialty" maxLength={120} defaultValue={barber.specialty ?? ""} /></label>
                         <label>Access
@@ -470,12 +466,6 @@ export default async function AdminDashboard({
                         </label>
                         <label>Commission %
                           <input name="commissionPercentage" type="number" min="0" max="100" step="0.1" defaultValue={barber.commissionPercentage ?? 0} required />
-                        </label>
-                        <label>New POS PIN
-                          <input name="posPin" type="password" inputMode="numeric" pattern="[0-9]{4,6}" minLength={4} maxLength={6} placeholder={barber.posPinHash ? "PIN is set — leave blank to keep" : "Set a 4–6 digit PIN"} autoComplete="new-password" />
-                        </label>
-                        <label className="portal-wide">New password
-                          <input name="password" type="password" minLength={10} placeholder="Leave blank to keep current password" autoComplete="new-password" />
                         </label>
                         <label className="portal-wide">Bio
                           <textarea name="bio" rows={5} maxLength={1200} defaultValue={barber.bio ?? ""} placeholder="Tell customers about this barber." />
@@ -494,12 +484,12 @@ export default async function AdminDashboard({
                           <input name="adminAccess" type="checkbox" defaultChecked={barber.adminAccess === true} />
                           <span>Grant this barber full admin portal access. They will retain their barber dashboard and POS access.</span>
                         </label>
-                        <label className="account-check portal-wide">
-                          <input name="smsNotificationsEnabled" type="checkbox" defaultChecked={barber.smsNotificationsEnabled === true} />
-                          <span>The barber agreed to receive automated HQ on Main texts for new and cancelled appointments. Frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or HELP for help.</span>
-                        </label>
+                        <div className="portal-wide staff-self-managed-status"><strong>{barber.credentialsConfiguredAt || (barber.passwordHash && barber.posPinHash) ? "Access configured by barber" : "Barber setup pending"}</strong><span>{barber.phone || "No mobile number"} · Notifications {barber.smsNotificationsEnabled ? "enabled" : "off"}</span></div>
                       </div>
-                      <button className="portal-save" type="submit">Save changes</button>
+                      <div className="staff-card-actions">
+                        <button className="button button-secondary" formAction={createBarberCredentialReset} type="submit">Create password/PIN reset link</button>
+                        <button className="portal-save" type="submit">Save changes</button>
+                      </div>
                     </form>
                   ))}
                 </div>

@@ -6,6 +6,7 @@ import {
   saveBarberServices,
   updateBarberAppointment,
 } from "@/app/actions/staff";
+import { updateBarberAccount } from "@/app/actions/barber-account";
 import { BarberAddAppointmentForm } from "@/components/barber-add-appointment-form";
 import { BarberTotalsReport } from "@/components/barber-totals-report";
 import { StaffHeader } from "@/components/staff-header";
@@ -34,6 +35,7 @@ const dashboardTabs = [
   { id: "add", label: "Add appointment", description: "Create a booking" },
   { id: "appointments", label: "Appointments", description: "Manage your guests" },
   { id: "totals", label: "Totals", description: "Register and completed cuts" },
+  { id: "account", label: "Account", description: "Login, PIN, and notifications" },
 ] as const;
 
 type DashboardTab = (typeof dashboardTabs)[number]["id"];
@@ -89,13 +91,13 @@ function isDashboardTab(value?: string): value is DashboardTab {
 export default async function BarberDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; tab?: string; period?: string; date?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; tab?: string; period?: string; date?: string }>;
 }) {
   const barber = await requireStaffRole("barber");
   const client = await getMongoClient();
   const db = client.db("hqonmain");
   const serviceCatalog = await getServiceCatalog();
-  const { error, tab, period, date } = await searchParams;
+  const { error, success, tab, period, date } = await searchParams;
   const activeTab: DashboardTab = isDashboardTab(tab) ? tab : "totals";
   const barberAppointmentFilter = { $or: [{ barberId: barber._id }, { barber: barber.name }] };
   const today = currentShopDateTime().date;
@@ -174,6 +176,7 @@ export default async function BarberDashboard({
           </div>
         </section>
         {error && <p className="portal-alert error" role="alert">{error}</p>}
+        {success && <p className="portal-alert success" role="status">{success}</p>}
 
         <div className="barber-workspace">
           <aside className="portal-sidebar" aria-label="Barber dashboard sections">
@@ -197,6 +200,30 @@ export default async function BarberDashboard({
           </aside>
 
           <div className="portal-tab-panel">
+            {activeTab === "account" && (
+              <section className="portal-section">
+                <div className="portal-section-heading">
+                  <div><h2>Your account</h2></div>
+                  <p>Only you choose your password, register PIN, phone number, and notification preference.</p>
+                </div>
+                <form className="portal-form portal-form-grid barber-account-form" action={updateBarberAccount}>
+                  <label>Mobile phone <small>Optional</small><input name="phone" type="tel" autoComplete="tel" defaultValue={barber.phone ?? ""} placeholder="(317) 555-0123" /></label>
+                  <label className="account-check portal-wide">
+                    <input name="smsNotificationsEnabled" type="checkbox" defaultChecked={barber.smsNotificationsEnabled === true} />
+                    <span>I agree to receive automated HQ on Main texts for new and cancelled appointments. Frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or HELP for help.</span>
+                  </label>
+                  <div className="portal-wide barber-account-divider"><strong>Change password or POS PIN</strong><p>Leave these fields blank to keep your current credentials. Your current password is required for either change.</p></div>
+                  <label>Current password<input name="currentPassword" type="password" autoComplete="current-password" /></label>
+                  <span aria-hidden="true"></span>
+                  <label>New password<input name="newPassword" type="password" minLength={10} autoComplete="new-password" /></label>
+                  <label>Confirm new password<input name="newPasswordConfirm" type="password" minLength={10} autoComplete="new-password" /></label>
+                  <label>New POS PIN<input name="newPosPin" type="password" inputMode="numeric" pattern="[0-9]{4,6}" minLength={4} maxLength={6} autoComplete="new-password" /></label>
+                  <label>Confirm new POS PIN<input name="newPosPinConfirm" type="password" inputMode="numeric" pattern="[0-9]{4,6}" minLength={4} maxLength={6} autoComplete="new-password" /></label>
+                  <button className="button button-primary portal-wide" type="submit">Save account settings</button>
+                </form>
+              </section>
+            )}
+
             {activeTab === "totals" && (
               <section className="portal-section">
                 <div className="portal-section-heading">

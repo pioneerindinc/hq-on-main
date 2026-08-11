@@ -27,7 +27,7 @@ export function PosBarberSelector({ barbers }: { barbers: PosBarber[] }) {
           >
             <span>{barber.name.slice(0, 1)}</span>
             <strong>{barber.name}</strong>
-            <small>{barber.hasPin ? (barber.onBreak ? "On break" : barber.specialty) : "Admin must set POS PIN"}</small>
+            <small>{barber.hasPin ? (barber.onBreak ? "On break" : barber.specialty) : "Complete barber account setup"}</small>
           </button>
         ))}
       </div>

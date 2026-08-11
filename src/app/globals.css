@@ -3603,6 +3603,84 @@ body:has(.pos-page) {
   line-height: 1.5;
 }
 
+.portal-alert.success {
+  border-color: #376747;
+  background: rgba(77, 172, 103, 0.1);
+  color: #a7e6b7;
+}
+
+.barber-invite-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  border: 1px solid #376747;
+  border-left: 4px solid #65c47d;
+  background: #101813;
+  margin-bottom: 28px;
+  padding: 20px;
+}
+
+.barber-invite-banner strong,
+.barber-invite-banner p {
+  margin: 0;
+}
+
+.barber-invite-banner p {
+  margin-top: 5px;
+  color: #a8b4aa;
+  font-size: 0.74rem;
+}
+
+.barber-invite-banner > div:last-child,
+.staff-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.barber-setup-panel {
+  width: min(100%, 720px);
+}
+
+.barber-setup-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.barber-setup-form .account-check,
+.barber-setup-form .button {
+  grid-column: 1 / -1;
+}
+
+.portal-form-note,
+.barber-account-divider,
+.staff-self-managed-status {
+  border: 1px solid #303030;
+  background: #0c0c0c;
+  margin: 0;
+  padding: 16px;
+  color: #b8b8b8;
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+
+.barber-account-divider strong,
+.staff-self-managed-status strong,
+.staff-self-managed-status span {
+  display: block;
+}
+
+.barber-account-divider p {
+  margin: 5px 0 0;
+}
+
+.staff-self-managed-status span {
+  margin-top: 4px;
+  color: #919191;
+}
+
 .auth-panel .portal-alert {
   margin-bottom: 22px;
 }
@@ -4354,6 +4432,10 @@ body:has(.pos-page) {
 .admin-workspace .staff-card > .portal-save {
   justify-self: end;
   min-width: 140px;
+}
+
+.admin-workspace .staff-card > .staff-card-actions {
+  justify-self: stretch;
 }
 
 .admin-appointment-list {
@@ -6995,6 +7077,32 @@ body:has(.pos-page) {
 }
 
 @media (max-width: 700px) {
+  .barber-invite-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .barber-invite-banner > div:last-child,
+  .staff-card-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .barber-invite-banner .button,
+  .staff-card-actions .button,
+  .staff-card-actions .portal-save {
+    width: 100%;
+    text-align: center;
+  }
+
+  .barber-setup-form {
+    grid-template-columns: 1fr;
+  }
+
+  .barber-setup-form .account-check,
+  .barber-setup-form .button {
+    grid-column: auto;
+  }
   .admin-closeout-facts {
     grid-template-columns: 1fr 1fr;
   }

@@ -3,7 +3,7 @@
 import { Binary, ObjectId, type Db } from "mongodb";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getStaffCollection, hashPassword, requireStaffRole } from "@/lib/auth";
+import { getStaffCollection, requireStaffRole } from "@/lib/auth";
 import {
   type DailyHours,
   dayNumber,
@@ -16,6 +16,7 @@ import {
 import { getMongoClient } from "@/lib/mongodb";
 import { createAppointment, type BookingSource } from "@/lib/appointment-service";
 import { resolveCustomer } from "@/lib/customer-identity";
+import { issueBarberSetupToken } from "@/lib/barber-setup";
 import { hasDrawerCloseout, recordPostCloseoutChange, type FinancialAuditChange } from "@/lib/financial-audit";
 import { formatMoney, parseMoneyToCents } from "@/lib/money";
 import { ensureServiceCatalog, getServiceCatalog } from "@/lib/services";
@@ -27,11 +28,6 @@ import {
 
 function value(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
-}
-
-function isValidSmsPhone(phone: string) {
-  const digits = phone.replace(/\D/g, "");
-  return digits.length === 10 || (digits.length === 11 && digits.startsWith("1"));
 }
 
 function dashboardError(area: "admin" | "barber", message: string, tab?: string): never {
@@ -419,14 +415,10 @@ function currentShopDateTime() {
 }
 
 export async function createBarber(formData: FormData) {
-  await requireStaffRole("admin");
+  const admin = await requireStaffRole("admin");
   const name = value(formData, "name");
   const email = value(formData, "email").toLowerCase();
-  const phone = value(formData, "phone");
-  const smsNotificationsEnabled = formData.get("smsNotificationsEnabled") === "on";
   const adminAccess = formData.get("adminAccess") === "on";
-  const password = value(formData, "password");
-  const posPin = value(formData, "posPin");
   const commissionPercentage = Number(value(formData, "commissionPercentage"));
   const specialty = value(formData, "specialty");
   const nickname = value(formData, "nickname");
@@ -435,11 +427,7 @@ export async function createBarber(formData: FormData) {
 
   if (
     name.length < 2 ||
-    (email.length > 0 && !email.includes("@")) ||
-    (phone.length > 0 && !isValidSmsPhone(phone)) ||
-    (smsNotificationsEnabled && !isValidSmsPhone(phone)) ||
-    password.length < 10 ||
-    !/^\d{4,6}$/.test(posPin) ||
+    !email.includes("@") ||
     !Number.isFinite(commissionPercentage) ||
     commissionPercentage < 0 ||
     commissionPercentage > 100 ||
@@ -449,7 +437,7 @@ export async function createBarber(formData: FormData) {
   ) {
     dashboardError(
       "admin",
-      "Enter valid account details, a 4–6 digit POS PIN, and a commission from 0% to 100%.",
+      "Enter valid account details and a commission from 0% to 100%.",
       "add-barber",
     );
   }
@@ -463,11 +451,6 @@ export async function createBarber(formData: FormData) {
   const result = await staff.insertOne({
     name,
     email,
-    phone,
-    smsNotificationsEnabled,
-    ...(smsNotificationsEnabled
-      ? { smsConsentAt: now, smsConsentSource: "admin-barber-profile" }
-      : {}),
     specialty,
     nickname,
     bio,
@@ -475,8 +458,6 @@ export async function createBarber(formData: FormData) {
     role: "barber",
     adminAccess,
     active: true,
-    passwordHash: await hashPassword(password),
-    posPinHash: await hashPassword(posPin),
     commissionPercentage,
     createdAt: now,
     updatedAt: now,
@@ -485,10 +466,12 @@ export async function createBarber(formData: FormData) {
     const client = await getMongoClient();
     await saveBarberPhoto(client.db("hqonmain"), result.insertedId, photo, now);
   }
+  const setupToken = await issueBarberSetupToken({ staffId: result.insertedId, createdByStaffId: admin._id, purpose: "onboarding" });
 
   revalidatePath("/admin/dashboard");
   revalidatePath("/barbers");
   revalidatePath("/book");
+  redirect(`/admin/dashboard?tab=barbers&invite=${encodeURIComponent(setupToken)}&inviteBarber=${encodeURIComponent(name)}`);
 }
 
 export async function updateBarber(formData: FormData) {
@@ -498,8 +481,6 @@ export async function updateBarber(formData: FormData) {
 
   const name = value(formData, "name");
   const email = value(formData, "email").toLowerCase();
-  const phone = value(formData, "phone");
-  const smsNotificationsEnabled = formData.get("smsNotificationsEnabled") === "on";
   const adminAccess = formData.get("adminAccess") === "on";
   const commissionPercentage = Number(value(formData, "commissionPercentage"));
   const specialty = value(formData, "specialty");
@@ -509,8 +490,6 @@ export async function updateBarber(formData: FormData) {
   if (
     name.length < 2 ||
     (email.length > 0 && !email.includes("@")) ||
-    (phone.length > 0 && !isValidSmsPhone(phone)) ||
-    (smsNotificationsEnabled && !isValidSmsPhone(phone)) ||
     !Number.isFinite(commissionPercentage) ||
     commissionPercentage < 0 ||
     commissionPercentage > 100 ||
@@ -524,8 +503,6 @@ export async function updateBarber(formData: FormData) {
   const update: Record<string, unknown> = {
     name,
     email,
-    phone,
-    smsNotificationsEnabled,
     adminAccess,
     specialty,
     nickname,
@@ -534,27 +511,11 @@ export async function updateBarber(formData: FormData) {
     active: value(formData, "active") === "true",
     updatedAt: new Date(),
   };
-  if (smsNotificationsEnabled) {
-    update.smsConsentAt = new Date();
-    update.smsConsentSource = "admin-barber-profile";
-  }
-
-  const newPassword = value(formData, "password");
-  if (newPassword) {
-    if (newPassword.length < 10) dashboardError("admin", "New passwords must be at least 10 characters.");
-    update.passwordHash = await hashPassword(newPassword);
-  }
-
-  const newPosPin = value(formData, "posPin");
-  if (newPosPin) {
-    if (!/^\d{4,6}$/.test(newPosPin)) {
-      dashboardError("admin", "POS PINs must contain 4–6 digits.", "barbers");
-    }
-    update.posPinHash = await hashPassword(newPosPin);
-  }
-
   const staff = await getStaffCollection();
   const barberId = new ObjectId(id);
+  if (await staff.findOne({ email, _id: { $ne: barberId } })) {
+    dashboardError("admin", "A staff account already uses that email.", "barbers");
+  }
   const client = await getMongoClient();
   const db = client.db("hqonmain");
   const removePhoto = !photo && formData.get("removePhoto") === "on";
@@ -574,21 +535,30 @@ export async function updateBarber(formData: FormData) {
     },
   );
 
-  if (!update.active || newPassword || newPosPin) {
+  if (!update.active) {
     await client
       .db("hqonmain")
       .collection("staffSessions")
       .deleteMany({ staffId: barberId });
-    if (!update.active || newPosPin) {
-      await client
-        .db("hqonmain")
-        .collection("posSessions")
-        .deleteMany({ staffId: barberId });
-    }
+    await client
+      .db("hqonmain")
+      .collection("posSessions")
+      .deleteMany({ staffId: barberId });
   }
   revalidatePath("/admin/dashboard");
   revalidatePath("/barbers");
   revalidatePath("/book");
+}
+
+export async function createBarberCredentialReset(formData: FormData) {
+  const admin = await requireStaffRole("admin");
+  const id = value(formData, "barberId");
+  if (!ObjectId.isValid(id)) dashboardError("admin", "Invalid barber account.", "barbers");
+  const staff = await getStaffCollection();
+  const barber = await staff.findOne({ _id: new ObjectId(id), role: "barber" });
+  if (!barber) dashboardError("admin", "Barber account not found.", "barbers");
+  const token = await issueBarberSetupToken({ staffId: barber._id, createdByStaffId: admin._id, purpose: "reset" });
+  redirect(`/admin/dashboard?tab=barbers&invite=${encodeURIComponent(token)}&inviteBarber=${encodeURIComponent(barber.name)}`);
 }
 
 async function adminAppointmentValues(
