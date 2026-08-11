@@ -22,7 +22,7 @@ export function Header() {
           <Link href="/services">Services</Link>
           <Link href="/barbers">Meet the barbers</Link>
           <Link href="/about">About HQ</Link>
-          <Link href="/customer/login">Customer login</Link>
+          <Link href="/customer/login">Customer center</Link>
         </nav>
         <Link className="button button-primary header-button" href="/book">
           Book now

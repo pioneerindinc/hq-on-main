@@ -1883,25 +1883,19 @@ select {
 .booking-confirmation span strong { font-size: 0.82rem; }
 
 /* Customer center */
-body:has(.customer-auth-page) > .site-header,
-body:has(.customer-auth-page) > .site-footer,
-body:has(.customer-center-page) > .site-header,
-body:has(.customer-center-page) > .site-footer {
-  display: none;
-}
-
 .customer-auth-page {
   display: grid;
-  min-height: 100svh;
+  min-height: 70svh;
   place-items: center;
-  background: radial-gradient(circle at 78% 22%, rgba(215, 24, 42, 0.14), transparent 25%), #0a0a0a;
-  padding: 50px 20px;
+  background: radial-gradient(circle at 78% 22%, rgba(215, 24, 42, 0.11), transparent 28%), #0b0b0b;
+  padding: clamp(70px, 9vw, 125px) 20px;
 }
 
 .customer-auth-panel {
   width: min(100%, 575px);
   border: 1px solid #343434;
-  background: #0d0d0d;
+  border-top: 3px solid var(--red);
+  background: #101010;
   padding: 50px;
   box-shadow: 0 35px 100px rgba(0, 0, 0, 0.45);
 }
@@ -1965,7 +1959,7 @@ body:has(.customer-center-page) > .site-footer {
 }
 
 .customer-center-page {
-  min-height: 100svh;
+  min-height: 70svh;
   background: radial-gradient(circle at 90% 8%, rgba(215, 24, 42, 0.07), transparent 22%), #0b0b0b;
 }
 
@@ -2035,6 +2029,17 @@ body:has(.customer-center-page) > .site-footer {
   justify-content: space-between;
   gap: 40px;
   margin-bottom: 70px;
+}
+
+.customer-center-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.customer-center-actions form {
+  margin: 0;
 }
 
 .customer-center-title h1 {

@@ -3,9 +3,9 @@ import Link from "next/link";
 import { ObjectId } from "mongodb";
 import {
   cancelCustomerAppointment,
+  logoutCustomer,
   updateCustomerProfile,
 } from "@/app/actions/customer";
-import { CustomerHeader } from "@/components/customer-header";
 import { currentShopDateTime, displayTime, formatDisplayDate } from "@/lib/booking";
 import { requireCustomer } from "@/lib/customer-auth";
 import { getMongoClient } from "@/lib/mongodb";
@@ -62,11 +62,13 @@ export default async function CustomerDashboard({
 
   return (
     <main className="customer-center-page">
-      <CustomerHeader name={customer.name} />
       <div className="container customer-center-content">
         <section className="customer-center-title">
           <div><p className="eyebrow">Your HQ</p><h1>Welcome back,<br />{customer.name.split(" ")[0]}.</h1></div>
-          <Link className="button button-primary" href="/book">Book another visit →</Link>
+          <div className="customer-center-actions">
+            <Link className="button button-primary" href="/book">Book another visit →</Link>
+            <form action={logoutCustomer}><button className="button button-secondary" type="submit">Sign out</button></form>
+          </div>
         </section>
 
         <div className="customer-center-layout">
