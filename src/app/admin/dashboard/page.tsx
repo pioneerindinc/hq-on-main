@@ -139,7 +139,7 @@ function isAdminTab(value?: string): value is AdminTab {
 }
 
 function financialView(value?: string): FinancialView {
-  return value === "profit-loss" || value === "balance-sheet" || value === "accounts" ? value : "ledger";
+  return value === "profit-loss" || value === "balance-sheet" || value === "import-ytd" || value === "accounts" ? value : "ledger";
 }
 
 const callDateTimeFormatter = new Intl.DateTimeFormat("en-US", {
@@ -214,7 +214,7 @@ export default async function AdminDashboard({
   searchParams: Promise<{ error?: string; tab?: string; customer?: string; call?: string; period?: string; date?: string; barber?: string; registerDate?: string; invite?: string; inviteBarber?: string; scheduleDate?: string; financialView?: string; financialStart?: string; financialEnd?: string; financialAsOf?: string; financialAccount?: string; financialNotice?: string }>;
 }) {
   const admin = await requireStaffRole("admin");
-  const { error, tab, customer: selectedCustomerId, call: selectedCallId, period, date, barber: performanceBarberId, registerDate, invite, inviteBarber, scheduleDate, financialView: requestedFinancialView, financialStart, financialEnd, financialAsOf, financialAccount } = await searchParams;
+  const { error, tab, customer: selectedCustomerId, call: selectedCallId, period, date, barber: performanceBarberId, registerDate, invite, inviteBarber, scheduleDate, financialView: requestedFinancialView, financialStart, financialEnd, financialAsOf, financialAccount, financialNotice } = await searchParams;
   const activeTab: AdminTab = isAdminTab(tab) ? tab : "barbers";
   const staff = await getStaffCollection();
   const customersCollection = await getCustomerCollection();
@@ -1039,6 +1039,7 @@ export default async function AdminDashboard({
                 dashboard={financialDashboard}
                 view={selectedFinancialView}
                 dates={{ start: financialStartDate, end: financialEndDate, asOf: financialAsOfDate }}
+                notice={financialNotice}
               />
             )}
 

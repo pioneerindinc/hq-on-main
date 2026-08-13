@@ -34,7 +34,7 @@ export type FinancialJournalEntryRecord = {
   businessDate: string;
   description: string;
   reference?: string;
-  transactionType: "deposit" | "withdrawal" | "transfer" | "reversal";
+  transactionType: "deposit" | "withdrawal" | "transfer" | "conversion" | "reversal";
   lines: FinancialJournalLine[];
   createdByStaffId: ObjectId;
   createdByName: string;
@@ -42,6 +42,8 @@ export type FinancialJournalEntryRecord = {
   reversedByEntryId?: ObjectId;
   reversedAt?: Date;
   reversalReason?: string;
+  conversionYear?: number;
+  conversionCutoffDate?: string;
   createdAt: Date;
 };
 
@@ -54,6 +56,7 @@ const DEFAULT_ACCOUNTS: Array<Omit<FinancialAccountRecord, "createdAt" | "update
   { code: "2100", name: "Loans Payable", type: "liability", active: true, system: true },
   { code: "3000", name: "Owner Equity", type: "equity", active: true, system: true },
   { code: "3100", name: "Owner Draws", type: "equity", active: true, system: true },
+  { code: "3990", name: "Conversion Equity", type: "equity", active: true, system: true },
   { code: "4000", name: "Service Revenue", type: "income", active: true, system: true },
   { code: "4100", name: "Other Income", type: "income", active: true, system: true },
   { code: "5000", name: "Barber Commissions", type: "expense", active: true, system: true },
@@ -169,6 +172,17 @@ export type FinancialDashboard = {
     totalEquityCents: number;
     totalLiabilitiesAndEquityCents: number;
   };
+  ytdImport: {
+    year: number;
+    start: string;
+    cutoff: string;
+    rows: Array<{
+      account: FinancialAccount;
+      currentCents: number;
+      suggestedCents?: number;
+      suggestionLabel?: string;
+    }>;
+  };
 };
 
 export async function getFinancialDashboard({
@@ -219,6 +233,10 @@ export async function getFinancialDashboard({
 
   const periodBalances = balancesFor(reportEntries);
   const asOfBalances = balancesFor(entriesThroughAsOf);
+  const conversionYear = Number(end.slice(0, 4));
+  const conversionStart = `${conversionYear}-01-01`;
+  const ytdEntries = entries.filter((entry) => entry.businessDate >= conversionStart && entry.businessDate <= end);
+  const ytdBalances = balancesFor(ytdEntries);
   const rows = (type: FinancialAccountType, balances: Map<string, number>) => accounts
     .filter((account) => account.type === type)
     .map((account) => ({ account, amountCents: balances.get(account._id.toString()) ?? 0 }))
@@ -236,13 +254,20 @@ export async function getFinancialDashboard({
   const totalAssetsCents = assets.reduce((total, row) => total + row.amountCents, 0);
   const totalLiabilitiesCents = liabilities.reduce((total, row) => total + row.amountCents, 0);
   const postedEquityCents = equity.reduce((total, row) => total + row.amountCents, 0);
-  const payouts = await db.collection<{ businessDate: string; barberId: ObjectId; paidAmountCents?: number }>("commissionPayouts").find({
-    businessDate: { $gte: start, $lte: end },
-  }).toArray();
+  const payoutCollection = db.collection<{ businessDate: string; barberId: ObjectId; paidAmountCents?: number }>("commissionPayouts");
+  const [payouts, ytdPayouts] = await Promise.all([
+    payoutCollection.find({ businessDate: { $gte: start, $lte: end } }).toArray(),
+    payoutCollection.find({ businessDate: { $gte: conversionStart, $lte: end } }).toArray(),
+  ]);
   const payoutByBarber = new Map<string, number>();
   for (const payout of payouts) {
     const id = payout.barberId?.toString();
     if (id) payoutByBarber.set(id, (payoutByBarber.get(id) ?? 0) + Number(payout.paidAmountCents ?? 0));
+  }
+  const ytdPayoutByBarber = new Map<string, number>();
+  for (const payout of ytdPayouts) {
+    const id = payout.barberId?.toString();
+    if (id) ytdPayoutByBarber.set(id, (ytdPayoutByBarber.get(id) ?? 0) + Number(payout.paidAmountCents ?? 0));
   }
   const contractor1099 = accounts
     .filter((account) => account.taxFormType === "1099-NEC" && account.vendorStaffId)
@@ -250,6 +275,31 @@ export async function getFinancialDashboard({
       const ledgerExpenseCents = periodBalances.get(account._id.toString()) ?? 0;
       const recordedPayoutCents = payoutByBarber.get(account.vendorStaffId!.toString()) ?? 0;
       return { account, ledgerExpenseCents, recordedPayoutCents, differenceCents: ledgerExpenseCents - recordedPayoutCents };
+    });
+  const posSales = await db.collection<{ checkoutAmountCents?: number }>("appointments").find({
+    requestedDate: { $gte: conversionStart, $lte: end },
+    status: "completed",
+    checkoutMethod: "cash",
+    checkoutAmountCents: { $gte: 0 },
+  }).project({ checkoutAmountCents: 1 }).toArray();
+  const suggestedRevenueCents = posSales.reduce((total, sale) => total + Number(sale.checkoutAmountCents ?? 0), 0);
+  const childParentIds = new Set(accounts.flatMap((account) => account.parentAccountId ? [account.parentAccountId.toString()] : []));
+  const ytdImportRows = accounts
+    .filter((account) => account.active && (account.type === "income" || account.type === "expense") && !childParentIds.has(account._id.toString()))
+    .map((account) => {
+      const currentCents = ytdBalances.get(account._id.toString()) ?? 0;
+      if (account.code === "4000") {
+        return { account, currentCents, suggestedCents: suggestedRevenueCents, suggestionLabel: "Completed POS cash sales" };
+      }
+      if (account.vendorStaffId) {
+        return {
+          account,
+          currentCents,
+          suggestedCents: ytdPayoutByBarber.get(account.vendorStaffId.toString()) ?? 0,
+          suggestionLabel: "Recorded POS cash payouts",
+        };
+      }
+      return { account, currentCents };
     });
 
   return {
@@ -277,6 +327,12 @@ export async function getFinancialDashboard({
       retainedEarningsCents,
       totalEquityCents: postedEquityCents + retainedEarningsCents,
       totalLiabilitiesAndEquityCents: totalLiabilitiesCents + postedEquityCents + retainedEarningsCents,
+    },
+    ytdImport: {
+      year: conversionYear,
+      start: conversionStart,
+      cutoff: end,
+      rows: ytdImportRows,
     },
   };
 }

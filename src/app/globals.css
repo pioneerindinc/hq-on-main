@@ -6526,7 +6526,7 @@ body:has(.pos-page) {
 }
 .financial-view-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-bottom: 20px;
   border: 1px solid #373737;
   background: #151515;
@@ -6543,6 +6543,42 @@ body:has(.pos-page) {
 .financial-view-tabs a:last-child { border-right: 0; }
 .financial-view-tabs a:hover,
 .financial-view-tabs a.active { background: var(--red); color: white; }
+.financial-account-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  overflow-x: auto;
+  padding: 2px 0 6px;
+  scrollbar-width: thin;
+}
+.financial-account-tabs a {
+  display: flex;
+  min-width: 165px;
+  border: 1px solid #3c3c3c;
+  background: #151515;
+  color: var(--text-muted);
+  flex: 1 0 165px;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 14px;
+}
+.financial-account-tabs a small {
+  color: var(--text-subtle);
+  font-size: 0.5rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+.financial-account-tabs a span {
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+.financial-account-tabs a:hover,
+.financial-account-tabs a.active {
+  border-color: var(--red);
+  background: var(--red);
+  color: white;
+}
+.financial-account-tabs a.active small { color: white; }
 .financial-date-controls,
 .financial-account-switcher {
   display: flex;
@@ -6693,6 +6729,94 @@ body:has(.pos-page) {
 .financial-accounts-list section span { color: var(--text-muted); font-size: 0.55rem; text-transform: uppercase; }
 .financial-new-account { position: sticky; top: 20px; grid-template-columns: 1fr 1fr; border: 1px solid #383838; background: #111; padding: 20px; }
 
+.financial-ytd-import > header {
+  max-width: 760px;
+  margin-bottom: 24px;
+}
+.financial-ytd-import > header h3 {
+  margin: 0;
+  font-family: var(--font-display), Impact, sans-serif;
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 400;
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+.financial-ytd-import > header > p:last-child {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  line-height: 1.65;
+}
+.financial-ytd-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin-bottom: 24px;
+  background: #373737;
+}
+.financial-ytd-steps article {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 10px;
+  background: #111;
+  padding: 17px;
+}
+.financial-ytd-steps article > span {
+  color: var(--red);
+  font-family: var(--font-display), Impact, sans-serif;
+  font-size: 1.6rem;
+}
+.financial-ytd-steps strong { font-size: 0.68rem; text-transform: uppercase; }
+.financial-ytd-steps p { margin: 5px 0 0; color: var(--text-muted); font-size: 0.62rem; line-height: 1.5; }
+.financial-ytd-cutoff {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 28px;
+  border: 1px solid #383838;
+  background: #111;
+  padding: 15px;
+}
+.financial-ytd-cutoff label {
+  display: flex;
+  color: var(--text-subtle);
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.55rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.financial-ytd-cutoff input,
+.financial-ytd-cutoff button {
+  height: 40px;
+  border: 1px solid #444;
+  background: #0b0b0b;
+  color: white;
+  color-scheme: dark;
+  padding: 0 10px;
+  font-size: 0.66rem;
+}
+.financial-ytd-cutoff button { border-color: var(--red); background: var(--red); cursor: pointer; font-weight: 900; text-transform: uppercase; }
+.financial-ytd-section { margin-top: 28px; }
+.financial-ytd-section > div:first-child { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-bottom: 10px; }
+.financial-ytd-section h4 { margin: 0; font-family: var(--font-display), Impact, sans-serif; font-size: 2rem; font-weight: 400; text-transform: uppercase; }
+.financial-ytd-section > div:first-child p { margin: 0; color: var(--text-muted); font-size: 0.62rem; }
+.financial-ytd-table-wrap { overflow-x: auto; border: 1px solid #383838; }
+.financial-ytd-table-wrap table { width: 100%; min-width: 760px; border-collapse: collapse; }
+.financial-ytd-table-wrap th { background: #171717; color: var(--text-subtle); padding: 11px; font-size: 0.52rem; letter-spacing: 0.07em; text-align: left; text-transform: uppercase; }
+.financial-ytd-table-wrap td { border-top: 1px solid #303030; padding: 11px; color: var(--text-muted); font-size: 0.66rem; vertical-align: middle; }
+.financial-ytd-table-wrap td:first-child strong,
+.financial-ytd-table-wrap td:nth-child(3) strong { display: block; color: white; }
+.financial-ytd-table-wrap td small { display: block; margin-top: 3px; color: var(--text-subtle); font-size: 0.53rem; }
+.financial-ytd-table-wrap td > label { display: flex; width: 150px; height: 38px; align-items: center; border: 1px solid #444; background: #090909; }
+.financial-ytd-table-wrap td > label span { padding-left: 9px; color: #8ee4ae; font-weight: 900; }
+.financial-ytd-table-wrap td > label input { width: 100%; height: 100%; border: 0; outline: 0; background: transparent; color: white; padding: 0 9px 0 4px; }
+.financial-ytd-table-wrap td > label:focus-within { border-color: var(--red); }
+.financial-ytd-confirmation { margin-top: 30px; border: 1px solid #71414a; background: rgba(215, 24, 42, 0.06); padding: 22px; }
+.financial-ytd-confirmation h4 { margin: 0; font-family: var(--font-display), Impact, sans-serif; font-size: 1.8rem; font-weight: 400; text-transform: uppercase; }
+.financial-ytd-confirmation ul { margin: 12px 0 20px; color: var(--text-muted); padding-left: 20px; font-size: 0.68rem; line-height: 1.7; }
+.financial-ytd-confirmation .account-check { margin-bottom: 18px; color: white; font-size: 0.7rem; line-height: 1.55; }
+
 @media (max-width: 850px) {
   .financial-accounts-layout { grid-template-columns: 1fr; }
   .financial-new-account { position: static; }
@@ -6700,8 +6824,10 @@ body:has(.pos-page) {
 
 @media (max-width: 700px) {
   .financial-view-tabs { grid-template-columns: 1fr 1fr; }
-  .financial-view-tabs a:nth-child(2) { border-right: 0; }
-  .financial-view-tabs a:nth-child(-n + 2) { border-bottom: 1px solid #373737; }
+  .financial-view-tabs a:nth-child(even) { border-right: 0; }
+  .financial-view-tabs a { border-bottom: 1px solid #373737; }
+  .financial-view-tabs a:last-child { grid-column: 1 / -1; border-bottom: 0; }
+  .financial-account-tabs a { min-width: 145px; flex-basis: 145px; }
   .financial-date-controls,
   .financial-account-switcher { display: grid; grid-template-columns: 1fr; }
   .financial-date-controls label,
@@ -6719,6 +6845,11 @@ body:has(.pos-page) {
   .financial-statement > header h3 { font-size: 2.3rem; }
   .financial-accounts-list section > div { grid-template-columns: 50px 1fr; }
   .financial-accounts-list section span { grid-column: 2; }
+  .financial-ytd-steps { grid-template-columns: 1fr; }
+  .financial-ytd-cutoff { align-items: stretch; flex-direction: column; }
+  .financial-ytd-cutoff input,
+  .financial-ytd-cutoff button { width: 100%; }
+  .financial-ytd-section > div:first-child { align-items: flex-start; flex-direction: column; gap: 5px; }
 }
 
 .staff-edit-grid {

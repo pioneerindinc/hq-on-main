@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireStaffRole } from "@/lib/auth";
 import {
+  ensureBarberCommissionSubaccounts,
   ensureFinancialAccounts,
   ensureFinancialJournalIndexes,
   FINANCIAL_ACCOUNT_TYPES,
@@ -24,6 +25,13 @@ function financialRedirect(type: "error" | "financialNotice", message: string, v
 
 function validDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T12:00:00Z`).valueOf());
+}
+
+function parseYtdMoney(value: unknown) {
+  const normalized = String(value ?? "").trim().replace(/[$,]/g, "");
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+  const amount = Number(normalized);
+  return Number.isFinite(amount) && amount >= 0 && amount <= 100_000_000 ? Math.round(amount * 100) : null;
 }
 
 export async function createFinancialAccount(formData: FormData) {
@@ -129,6 +137,97 @@ export async function createFinancialTransaction(formData: FormData) {
   });
   revalidatePath("/admin/dashboard");
   financialRedirect("financialNotice", "Transaction posted to the ledger.");
+}
+
+export async function importFinancialYearToDate(formData: FormData) {
+  const admin = await requireStaffRole("admin");
+  const cutoffDate = value(formData, "cutoffDate");
+  const confirmation = formData.get("confirmConversion") === "on";
+  if (!validDate(cutoffDate) || !confirmation) {
+    financialRedirect("error", "Choose a valid cutoff date and confirm that these totals do not include bank balances.", "import-ytd");
+  }
+  const year = Number(cutoffDate.slice(0, 4));
+  const yearStart = `${year}-01-01`;
+  const client = await getMongoClient();
+  const db = client.db("hqonmain");
+  const accountsCollection = await ensureBarberCommissionSubaccounts(db);
+  const accounts = await accountsCollection.find({ active: true }).toArray();
+  const conversionEquity = accounts.find((account) => account.code === "3990" && account.type === "equity");
+  if (!conversionEquity) financialRedirect("error", "Conversion Equity is unavailable.", "import-ytd");
+  const childParentIds = new Set(accounts.flatMap((account) => account.parentAccountId ? [account.parentAccountId.toString()] : []));
+  const targetAccounts = accounts.filter((account) =>
+    (account.type === "income" || account.type === "expense") && !childParentIds.has(account._id.toString()),
+  );
+  const targets = new Map<string, number>();
+  for (const account of targetAccounts) {
+    const raw = formData.get(`target_${account._id.toString()}`);
+    const target = parseYtdMoney(raw);
+    if (target === null) financialRedirect("error", `Enter a valid year-to-date total for ${account.name}.`, "import-ytd");
+    targets.set(account._id.toString(), target);
+  }
+
+  const entries = await ensureFinancialJournalIndexes(db);
+  const existingEntries = await entries.find({ businessDate: { $gte: yearStart, $lte: cutoffDate } }).toArray();
+  const current = new Map<string, number>();
+  for (const entry of existingEntries) {
+    for (const line of entry.lines) {
+      if (line.accountType !== "income" && line.accountType !== "expense") continue;
+      const amount = line.accountType === "expense"
+        ? line.debitCents - line.creditCents
+        : line.creditCents - line.debitCents;
+      const id = line.accountId.toString();
+      current.set(id, (current.get(id) ?? 0) + amount);
+    }
+  }
+  const lines: FinancialJournalLine[] = [];
+  let debitCents = 0;
+  let creditCents = 0;
+  for (const account of targetAccounts) {
+    const delta = (targets.get(account._id.toString()) ?? 0) - (current.get(account._id.toString()) ?? 0);
+    if (delta === 0) continue;
+    const debit = account.type === "expense" ? Math.max(0, delta) : Math.max(0, -delta);
+    const credit = account.type === "income" ? Math.max(0, delta) : Math.max(0, -delta);
+    debitCents += debit;
+    creditCents += credit;
+    lines.push({
+      accountId: account._id,
+      accountCode: account.code,
+      accountName: account.name,
+      accountType: account.type,
+      debitCents: debit,
+      creditCents: credit,
+    });
+  }
+  if (!lines.length) financialRedirect("financialNotice", "The ledger already matches those year-to-date targets. No entry was needed.", "import-ytd");
+  const equityDebit = Math.max(0, creditCents - debitCents);
+  const equityCredit = Math.max(0, debitCents - creditCents);
+  lines.push({
+    accountId: conversionEquity._id,
+    accountCode: conversionEquity.code,
+    accountName: conversionEquity.name,
+    accountType: conversionEquity.type,
+    debitCents: equityDebit,
+    creditCents: equityCredit,
+  });
+  const totalDebits = lines.reduce((total, line) => total + line.debitCents, 0);
+  const totalCredits = lines.reduce((total, line) => total + line.creditCents, 0);
+  if (totalDebits !== totalCredits || lines.some((line) => line.accountType === "asset" || line.accountType === "liability")) {
+    financialRedirect("error", "The conversion entry did not balance and was not posted.", "import-ytd");
+  }
+  await entries.insertOne({
+    businessDate: cutoffDate,
+    description: `${year} year-to-date conversion through ${cutoffDate}`,
+    reference: "Guided YTD import",
+    transactionType: "conversion",
+    lines,
+    createdByStaffId: admin._id,
+    createdByName: admin.name,
+    conversionYear: year,
+    conversionCutoffDate: cutoffDate,
+    createdAt: new Date(),
+  });
+  revalidatePath("/admin/dashboard");
+  financialRedirect("financialNotice", "Year-to-date targets were posted through Conversion Equity. Bank and drawer balances were not changed.", "import-ytd");
 }
 
 export async function reverseFinancialTransaction(formData: FormData) {

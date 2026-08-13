@@ -1,15 +1,16 @@
 import Link from "next/link";
-import { createFinancialAccount, createFinancialTransaction, reverseFinancialTransaction } from "@/app/actions/financials";
+import { createFinancialAccount, createFinancialTransaction, importFinancialYearToDate, reverseFinancialTransaction } from "@/app/actions/financials";
 import { formatDisplayDate } from "@/lib/booking";
 import type { FinancialAccount, FinancialDashboard, FinancialJournalLine } from "@/lib/financial-ledger";
 import { formatMoney } from "@/lib/money";
 
-export type FinancialView = "ledger" | "profit-loss" | "balance-sheet" | "accounts";
+export type FinancialView = "ledger" | "profit-loss" | "balance-sheet" | "import-ytd" | "accounts";
 
 const views: Array<{ id: FinancialView; label: string }> = [
   { id: "ledger", label: "Bank ledger" },
   { id: "profit-loss", label: "Profit & loss" },
   { id: "balance-sheet", label: "Balance sheet" },
+  { id: "import-ytd", label: "Import YTD" },
   { id: "accounts", label: "Chart of accounts" },
 ];
 
@@ -33,16 +34,22 @@ function activeAccounts(accounts: FinancialAccount[]) {
   return accounts.filter((account) => account.active);
 }
 
+function moneyInput(cents: number) {
+  return (cents / 100).toFixed(2);
+}
+
 export type FinancialDates = { start: string; end: string; asOf: string };
 
 export function FinancialDashboardPanel({
   dashboard,
   view,
   dates,
+  notice,
 }: {
   dashboard: FinancialDashboard;
   view: FinancialView;
   dates: FinancialDates;
+  notice?: string;
 }) {
   const selectedAccountId = dashboard.selectedCashAccount?._id.toString() ?? "";
   const otherAccounts = activeAccounts(dashboard.accounts).filter((account) => account._id.toString() !== selectedAccountId);
@@ -52,6 +59,7 @@ export function FinancialDashboardPanel({
       <div className="portal-section-heading">
         <div><h2>Financials</h2></div>
       </div>
+      {notice && <p className="portal-alert success" role="status">{notice}</p>}
 
       <nav className="financial-view-tabs" aria-label="Financial views">
         {views.map((item) => (
@@ -59,7 +67,7 @@ export function FinancialDashboardPanel({
         ))}
       </nav>
 
-      {view !== "accounts" && (
+      {view !== "accounts" && view !== "import-ytd" && (
         <form className="financial-date-controls" method="get" action="/admin/dashboard">
           <input type="hidden" name="tab" value="financials" />
           <input type="hidden" name="financialView" value={view} />
@@ -71,23 +79,89 @@ export function FinancialDashboardPanel({
         </form>
       )}
 
+      {view === "import-ytd" && (
+        <div className="financial-ytd-import">
+          <header>
+            <p className="eyebrow">Conversion setup</p>
+            <h3>Import {dashboard.ytdImport.year} year-to-date totals</h3>
+            <p>Bring the current year up to date without changing the bank or drawer. This posts only the difference between the ledger&apos;s current total and the desired total for each income or expense account.</p>
+          </header>
+
+          <div className="financial-ytd-steps">
+            <article><span>01</span><div><strong>Choose the cutoff</strong><p>Use the last date included in the totals you are entering.</p></div></article>
+            <article><span>02</span><div><strong>Review suggested totals</strong><p>POS sales and recorded barber payouts are suggestions. Verify them against your records.</p></div></article>
+            <article><span>03</span><div><strong>Post the adjustment</strong><p>Conversion Equity balances the entry. No asset, bank, drawer, or liability account is touched.</p></div></article>
+          </div>
+
+          <form className="financial-ytd-cutoff" method="get" action="/admin/dashboard">
+            <input type="hidden" name="tab" value="financials" />
+            <input type="hidden" name="financialView" value="import-ytd" />
+            <input type="hidden" name="financialStart" value={`${dashboard.ytdImport.year}-01-01`} />
+            <input type="hidden" name="financialAsOf" value={dashboard.ytdImport.cutoff} />
+            <label>Import totals through<input type="date" name="financialEnd" min={`${dashboard.ytdImport.year}-01-01`} max={`${dashboard.ytdImport.year}-12-31`} defaultValue={dashboard.ytdImport.cutoff} /></label>
+            <button type="submit">Change cutoff</button>
+          </form>
+
+          <form action={importFinancialYearToDate}>
+            <input type="hidden" name="cutoffDate" value={dashboard.ytdImport.cutoff} />
+            {(["income", "expense"] as const).map((type) => (
+              <section className="financial-ytd-section" key={type}>
+                <div><h4>{type === "income" ? "Income" : "Expenses"}</h4><p>Target totals from {formatDisplayDate(dashboard.ytdImport.start)} through {formatDisplayDate(dashboard.ytdImport.cutoff)}.</p></div>
+                <div className="financial-ytd-table-wrap">
+                  <table>
+                    <thead><tr><th>Account</th><th>Already in ledger</th><th>POS suggestion</th><th>Desired YTD total</th></tr></thead>
+                    <tbody>
+                      {dashboard.ytdImport.rows.filter((row) => row.account.type === type).map((row) => {
+                        const target = row.suggestedCents ?? row.currentCents;
+                        return (
+                          <tr key={row.account._id.toString()}>
+                            <td><strong>{row.account.parentAccountId ? "↳ " : ""}{row.account.name}</strong><small>{row.account.code}{row.account.taxFormType ? ` · ${row.account.taxFormType}` : ""}</small></td>
+                            <td>{formatMoney(row.currentCents)}</td>
+                            <td>{row.suggestedCents === undefined ? <span>Manual</span> : <><strong>{formatMoney(row.suggestedCents)}</strong><small>{row.suggestionLabel}</small></>}</td>
+                            <td><label><span>$</span><input name={`target_${row.account._id.toString()}`} inputMode="decimal" defaultValue={moneyInput(target)} required /></label></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
+            <div className="financial-ytd-confirmation">
+              <h4>Before posting</h4>
+              <ul><li>Do not include bank or drawer balances in these fields.</li><li>Use amounts covering January 1 through the cutoff date only.</li><li>Confirm POS suggestions against receipts, payout records, and prior books.</li><li>A later correction creates another immutable adjustment; it does not overwrite this import.</li></ul>
+              <label className="account-check"><input type="checkbox" name="confirmConversion" required /><span>I reviewed these targets and understand this import uses Conversion Equity without changing any bank or cash balance.</span></label>
+              <button className="button button-primary" type="submit">Post year-to-date conversion</button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {view === "ledger" && (
         <>
+          <nav className="financial-account-tabs" aria-label="Ledger accounts">
+            {dashboard.cashAccounts.map((account) => {
+              const accountId = account._id.toString();
+              const isSelected = accountId === selectedAccountId;
+              return (
+                <Link
+                  className={isSelected ? "active" : ""}
+                  href={financialHref("ledger", dates, accountId)}
+                  aria-current={isSelected ? "page" : undefined}
+                  key={accountId}
+                >
+                  <small>{account.code}</small>
+                  <span>{account.name}</span>
+                </Link>
+              );
+            })}
+          </nav>
+
           <div className="financial-ledger-summary">
             <div><small>Account</small><strong>{dashboard.selectedCashAccount?.name ?? "No bank account"}</strong></div>
             <div><small>Opening balance</small><strong>{formatMoney(dashboard.ledgerOpeningBalanceCents)}</strong></div>
             <div><small>Closing balance</small><strong>{formatMoney(dashboard.ledgerClosingBalanceCents)}</strong></div>
           </div>
-
-          <form className="financial-account-switcher" method="get" action="/admin/dashboard">
-            <input type="hidden" name="tab" value="financials" />
-            <input type="hidden" name="financialView" value="ledger" />
-            <input type="hidden" name="financialStart" value={dates.start} />
-            <input type="hidden" name="financialEnd" value={dates.end} />
-            <input type="hidden" name="financialAsOf" value={dates.asOf} />
-            <label>Ledger account<select name="financialAccount" defaultValue={selectedAccountId}>{dashboard.cashAccounts.map((account) => <option value={account._id.toString()} key={account._id.toString()}>{account.code} · {account.name}</option>)}</select></label>
-            <button type="submit">View account</button>
-          </form>
 
           {dashboard.selectedCashAccount && (
             <details className="financial-entry-composer" open={dashboard.ledger.length === 0}>
