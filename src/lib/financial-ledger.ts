@@ -34,7 +34,7 @@ export type FinancialJournalEntryRecord = {
   businessDate: string;
   description: string;
   reference?: string;
-  transactionType: "deposit" | "withdrawal" | "transfer" | "conversion" | "reversal";
+  transactionType: "deposit" | "withdrawal" | "transfer" | "conversion" | "opening-balance" | "reversal";
   lines: FinancialJournalLine[];
   createdByStaffId: ObjectId;
   createdByName: string;
@@ -44,6 +44,7 @@ export type FinancialJournalEntryRecord = {
   reversalReason?: string;
   conversionYear?: number;
   conversionCutoffDate?: string;
+  openingBalanceDate?: string;
   createdAt: Date;
 };
 
@@ -53,6 +54,7 @@ const DEFAULT_ACCOUNTS: Array<Omit<FinancialAccountRecord, "createdAt" | "update
   { code: "1000", name: "Home Bank - Checking", type: "asset", active: true, isCashAccount: true, system: true },
   { code: "1010", name: "Drawer Cash", type: "asset", active: true, isCashAccount: true, system: true },
   { code: "2000", name: "Accounts Payable", type: "liability", active: true, system: true },
+  { code: "2050", name: "Credit Cards Payable", type: "liability", active: true, system: true },
   { code: "2100", name: "Loans Payable", type: "liability", active: true, system: true },
   { code: "3000", name: "Owner Equity", type: "equity", active: true, system: true },
   { code: "3100", name: "Owner Draws", type: "equity", active: true, system: true },
@@ -183,6 +185,13 @@ export type FinancialDashboard = {
       suggestionLabel?: string;
     }>;
   };
+  openingBalances: {
+    date: string;
+    rows: Array<{
+      account: FinancialAccount;
+      currentCents: number;
+    }>;
+  };
 };
 
 export async function getFinancialDashboard({
@@ -301,6 +310,9 @@ export async function getFinancialDashboard({
       }
       return { account, currentCents };
     });
+  const openingBalanceRows = accounts
+    .filter((account) => account.active && (account.type === "asset" || account.type === "liability") && !childParentIds.has(account._id.toString()))
+    .map((account) => ({ account, currentCents: asOfBalances.get(account._id.toString()) ?? 0 }));
 
   return {
     accounts,
@@ -333,6 +345,10 @@ export async function getFinancialDashboard({
       start: conversionStart,
       cutoff: end,
       rows: ytdImportRows,
+    },
+    openingBalances: {
+      date: asOf,
+      rows: openingBalanceRows,
     },
   };
 }

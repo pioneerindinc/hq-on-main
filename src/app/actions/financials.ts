@@ -230,6 +230,98 @@ export async function importFinancialYearToDate(formData: FormData) {
   financialRedirect("financialNotice", "Year-to-date targets were posted through Conversion Equity. Bank and drawer balances were not changed.", "import-ytd");
 }
 
+export async function importFinancialOpeningBalances(formData: FormData) {
+  const admin = await requireStaffRole("admin");
+  const openingDate = value(formData, "openingDate");
+  const confirmation = formData.get("confirmOpeningBalances") === "on";
+  if (!validDate(openingDate) || !confirmation) {
+    financialRedirect("error", "Choose a valid opening date and confirm the balances.", "opening-balances");
+  }
+
+  const client = await getMongoClient();
+  const db = client.db("hqonmain");
+  const accountsCollection = await ensureFinancialAccounts(db);
+  const accounts = await accountsCollection.find({ active: true }).toArray();
+  const conversionEquity = accounts.find((account) => account.code === "3990" && account.type === "equity");
+  if (!conversionEquity) financialRedirect("error", "Conversion Equity is unavailable.", "opening-balances");
+
+  const childParentIds = new Set(accounts.flatMap((account) => account.parentAccountId ? [account.parentAccountId.toString()] : []));
+  const targetAccounts = accounts.filter((account) =>
+    (account.type === "asset" || account.type === "liability") && !childParentIds.has(account._id.toString()),
+  );
+  const targets = new Map<string, number>();
+  for (const account of targetAccounts) {
+    const target = parseYtdMoney(formData.get(`opening_${account._id.toString()}`));
+    if (target === null) financialRedirect("error", `Enter a valid opening balance for ${account.name}.`, "opening-balances");
+    targets.set(account._id.toString(), target);
+  }
+
+  const entries = await ensureFinancialJournalIndexes(db);
+  const existingEntries = await entries.find({ businessDate: { $lte: openingDate } }).toArray();
+  const current = new Map<string, number>();
+  for (const entry of existingEntries) {
+    for (const line of entry.lines) {
+      if (line.accountType !== "asset" && line.accountType !== "liability") continue;
+      const amount = line.accountType === "asset"
+        ? line.debitCents - line.creditCents
+        : line.creditCents - line.debitCents;
+      const id = line.accountId.toString();
+      current.set(id, (current.get(id) ?? 0) + amount);
+    }
+  }
+
+  const lines: FinancialJournalLine[] = [];
+  let debitCents = 0;
+  let creditCents = 0;
+  for (const account of targetAccounts) {
+    const delta = (targets.get(account._id.toString()) ?? 0) - (current.get(account._id.toString()) ?? 0);
+    if (delta === 0) continue;
+    const debit = account.type === "asset" ? Math.max(0, delta) : Math.max(0, -delta);
+    const credit = account.type === "liability" ? Math.max(0, delta) : Math.max(0, -delta);
+    debitCents += debit;
+    creditCents += credit;
+    lines.push({
+      accountId: account._id,
+      accountCode: account.code,
+      accountName: account.name,
+      accountType: account.type,
+      debitCents: debit,
+      creditCents: credit,
+    });
+  }
+  if (!lines.length) {
+    financialRedirect("financialNotice", "The ledger already matches those opening balances. No entry was needed.", "opening-balances");
+  }
+
+  lines.push({
+    accountId: conversionEquity._id,
+    accountCode: conversionEquity.code,
+    accountName: conversionEquity.name,
+    accountType: conversionEquity.type,
+    debitCents: Math.max(0, creditCents - debitCents),
+    creditCents: Math.max(0, debitCents - creditCents),
+  });
+  const totalDebits = lines.reduce((total, line) => total + line.debitCents, 0);
+  const totalCredits = lines.reduce((total, line) => total + line.creditCents, 0);
+  if (totalDebits !== totalCredits) {
+    financialRedirect("error", "The opening-balance entry did not balance and was not posted.", "opening-balances");
+  }
+
+  await entries.insertOne({
+    businessDate: openingDate,
+    description: `Opening balances as of ${openingDate}`,
+    reference: "Guided opening balance import",
+    transactionType: "opening-balance",
+    lines,
+    createdByStaffId: admin._id,
+    createdByName: admin.name,
+    openingBalanceDate: openingDate,
+    createdAt: new Date(),
+  });
+  revalidatePath("/admin/dashboard");
+  financialRedirect("financialNotice", "Opening balances were posted through Conversion Equity.", "opening-balances");
+}
+
 export async function reverseFinancialTransaction(formData: FormData) {
   const admin = await requireStaffRole("admin");
   const entryId = value(formData, "entryId");

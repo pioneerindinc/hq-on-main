@@ -139,7 +139,7 @@ function isAdminTab(value?: string): value is AdminTab {
 }
 
 function financialView(value?: string): FinancialView {
-  return value === "profit-loss" || value === "balance-sheet" || value === "import-ytd" || value === "accounts" ? value : "ledger";
+  return value === "profit-loss" || value === "balance-sheet" || value === "opening-balances" || value === "import-ytd" || value === "accounts" ? value : "ledger";
 }
 
 const callDateTimeFormatter = new Intl.DateTimeFormat("en-US", {

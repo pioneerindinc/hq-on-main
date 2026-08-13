@@ -1,15 +1,16 @@
 import Link from "next/link";
-import { createFinancialAccount, createFinancialTransaction, importFinancialYearToDate, reverseFinancialTransaction } from "@/app/actions/financials";
+import { createFinancialAccount, createFinancialTransaction, importFinancialOpeningBalances, importFinancialYearToDate, reverseFinancialTransaction } from "@/app/actions/financials";
 import { formatDisplayDate } from "@/lib/booking";
 import type { FinancialAccount, FinancialDashboard, FinancialJournalLine } from "@/lib/financial-ledger";
 import { formatMoney } from "@/lib/money";
 
-export type FinancialView = "ledger" | "profit-loss" | "balance-sheet" | "import-ytd" | "accounts";
+export type FinancialView = "ledger" | "profit-loss" | "balance-sheet" | "opening-balances" | "import-ytd" | "accounts";
 
 const views: Array<{ id: FinancialView; label: string }> = [
   { id: "ledger", label: "Bank ledger" },
   { id: "profit-loss", label: "Profit & loss" },
   { id: "balance-sheet", label: "Balance sheet" },
+  { id: "opening-balances", label: "Opening balances" },
   { id: "import-ytd", label: "Import YTD" },
   { id: "accounts", label: "Chart of accounts" },
 ];
@@ -67,7 +68,7 @@ export function FinancialDashboardPanel({
         ))}
       </nav>
 
-      {view !== "accounts" && view !== "import-ytd" && (
+      {view !== "accounts" && view !== "opening-balances" && view !== "import-ytd" && (
         <form className="financial-date-controls" method="get" action="/admin/dashboard">
           <input type="hidden" name="tab" value="financials" />
           <input type="hidden" name="financialView" value={view} />
@@ -77,6 +78,60 @@ export function FinancialDashboardPanel({
           <label>Balance sheet as of<input type="date" name="financialAsOf" defaultValue={dates.asOf} /></label>
           <button type="submit">Run reports</button>
         </form>
+      )}
+
+      {view === "opening-balances" && (
+        <div className="financial-ytd-import">
+          <header>
+            <p className="eyebrow">Conversion setup</p>
+            <h3>Set opening balance-sheet balances</h3>
+            <p>Enter what each asset and liability account should show at the end of the conversion date. The system posts only the difference already missing from the ledger and balances it through Conversion Equity.</p>
+          </header>
+
+          <div className="financial-ytd-steps">
+            <article><span>01</span><div><strong>Choose the date</strong><p>Use the day immediately before bookkeeping begins in this system.</p></div></article>
+            <article><span>02</span><div><strong>Enter statement balances</strong><p>Use positive amounts for bank balances, credit cards, loans, and other liabilities.</p></div></article>
+            <article><span>03</span><div><strong>Post the adjustment</strong><p>Assets become debits, liabilities become credits, and Conversion Equity balances the entry.</p></div></article>
+          </div>
+
+          <form className="financial-ytd-cutoff" method="get" action="/admin/dashboard">
+            <input type="hidden" name="tab" value="financials" />
+            <input type="hidden" name="financialView" value="opening-balances" />
+            <input type="hidden" name="financialStart" value={dates.start} />
+            <input type="hidden" name="financialEnd" value={dates.end} />
+            <label>Opening balances as of<input type="date" name="financialAsOf" defaultValue={dashboard.openingBalances.date} /></label>
+            <button type="submit">Change date</button>
+          </form>
+
+          <form action={importFinancialOpeningBalances}>
+            <input type="hidden" name="openingDate" value={dashboard.openingBalances.date} />
+            {(["asset", "liability"] as const).map((type) => (
+              <section className="financial-ytd-section" key={type}>
+                <div><h4>{type === "asset" ? "Assets" : "Liabilities"}</h4><p>{type === "asset" ? "Bank, cash, and other asset balances." : "Credit cards, loans, and other amounts owed."}</p></div>
+                <div className="financial-ytd-table-wrap">
+                  <table>
+                    <thead><tr><th>Account</th><th>Currently in ledger</th><th>Desired opening balance</th></tr></thead>
+                    <tbody>
+                      {dashboard.openingBalances.rows.filter((row) => row.account.type === type).map((row) => (
+                        <tr key={row.account._id.toString()}>
+                          <td><strong>{row.account.parentAccountId ? "↳ " : ""}{row.account.name}</strong><small>{row.account.code}</small></td>
+                          <td>{formatMoney(row.currentCents)}</td>
+                          <td><label><span>$</span><input name={`opening_${row.account._id.toString()}`} inputMode="decimal" defaultValue={moneyInput(Math.max(0, row.currentCents))} required /></label></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
+            <div className="financial-ytd-confirmation">
+              <h4>Before posting</h4>
+              <ul><li>Enter positive balances; the account type determines debit or credit automatically.</li><li>Use balances from the same statement date for every account.</li><li>Enter zero for accounts with no opening balance.</li><li>Reposting later adjusts accounts to the new targets instead of duplicating them.</li></ul>
+              <label className="account-check"><input type="checkbox" name="confirmOpeningBalances" required /><span>I reviewed these opening balances and understand the net difference posts to Conversion Equity.</span></label>
+              <button className="button button-primary" type="submit">Post opening balances</button>
+            </div>
+          </form>
+        </div>
       )}
 
       {view === "import-ytd" && (
@@ -174,7 +229,7 @@ export function FinancialDashboardPanel({
                 <label>Description<input name="description" maxLength={180} placeholder="Rent, deposit, bank fee…" required /></label>
                 <label>Amount<input name="amount" inputMode="decimal" placeholder="0.00" required /></label>
                 <label className="wide">Reference (optional)<input name="reference" maxLength={80} placeholder="Check number, statement memo, or receipt" /></label>
-                <p className="financial-form-help wide">For an opening bank balance, choose Money in and Owner Equity. Use Transfer only when both sides are bank or cash accounts.</p>
+                <p className="financial-form-help wide">Use Opening balances for initial bank, credit-card, and loan balances. Use Transfer only when both sides are bank or cash accounts.</p>
                 <button className="button button-primary wide" type="submit">Post transaction</button>
               </form>
             </details>
