@@ -11,6 +11,14 @@ export async function GET() {
           lastName: customer.lastName || splitCustomerName(customer.name).lastName,
           email: customer.email || "",
           phone: customer.phone,
+          dependents: (customer.dependents ?? [])
+            .filter((dependent) => dependent.active !== false)
+            .map((dependent) => ({
+              id: dependent.id,
+              firstName: dependent.firstName,
+              lastName: dependent.lastName || "",
+              relationship: dependent.relationship === "dependent" ? "dependent" : "child",
+            })),
         }
       : null,
   });

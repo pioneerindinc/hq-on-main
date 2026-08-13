@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ObjectId } from "mongodb";
 import {
+  addCustomerDependent,
   cancelCustomerAppointment,
   logoutCustomer,
+  updateCustomerDependent,
   updateCustomerProfile,
 } from "@/app/actions/customer";
 import { currentShopDateTime, displayTime, formatDisplayDate } from "@/lib/booking";
@@ -18,6 +20,7 @@ export const metadata: Metadata = {
 const tabs = [
   { id: "appointments", label: "Appointments", description: "Upcoming and past visits" },
   { id: "profile", label: "Profile", description: "Contact information" },
+  { id: "family", label: "Family", description: "People you book for" },
 ] as const;
 type Tab = (typeof tabs)[number]["id"];
 
@@ -29,6 +32,9 @@ type Appointment = {
   requestedDate?: string;
   requestedTime?: string;
   status?: string;
+  recipientName?: string;
+  recipientType?: "self" | "dependent";
+  recipientProfileId?: string;
   createdAt?: Date;
 };
 
@@ -61,7 +67,7 @@ export default async function CustomerDashboard({
   const history = appointments.filter((appointment) => !upcoming.includes(appointment));
 
   return (
-    <main className="customer-center-page">
+
       <div className="container customer-center-content">
         <section className="customer-center-title">
           <div><p className="eyebrow">Your HQ</p><h1>Welcome back,<br />{customer.name.split(" ")[0]}.</h1></div>
@@ -109,6 +115,7 @@ export default async function CustomerDashboard({
                       <div>
                         <span className={`appointment-status ${appointment.status ?? "pending"}`}>{appointment.status ?? "pending"}</span>
                         <h3>{appointment.service ?? "Appointment"}</h3>
+                        <small className="customer-appointment-recipient">For {appointment.recipientName ?? customer.name}</small>
                         <p>{appointment.barber ?? "HQ Barber"} · {displayTime(appointment.requestedTime ?? "")}</p>
                       </div>
                       <form action={cancelCustomerAppointment}>
@@ -124,13 +131,68 @@ export default async function CustomerDashboard({
                     <h2>Past activity</h2>
                     {history.map((appointment) => (
                       <article key={appointment._id.toString()}>
-                        <div><strong>{appointment.service ?? "Appointment"}</strong><span>{appointment.barber ?? "HQ Barber"}</span></div>
+                        <div><strong>{appointment.service ?? "Appointment"}</strong><span>For {appointment.recipientName ?? customer.name} · {appointment.barber ?? "HQ Barber"}</span></div>
                         <p>{formatDisplayDate(appointment.requestedDate) || "Date pending"} · {displayTime(appointment.requestedTime ?? "")}</p>
                         <span className={`appointment-status ${appointment.status ?? "completed"}`}>{appointment.status ?? "completed"}</span>
                       </article>
                     ))}
                   </div>
                 )}
+              </>
+            )}
+
+            {activeTab === "family" && (
+              <>
+                <div className="customer-panel-heading">
+                  <div><p className="eyebrow">People I book for</p><h2>Family profiles</h2></div>
+                  <strong>{1 + (customer.dependents ?? []).filter((dependent) => dependent.active !== false).length}</strong>
+                </div>
+                <p className="customer-family-intro">Your verified phone controls the account. Each person keeps their own appointment history and does not need a separate login.</p>
+
+                <div className="customer-family-list">
+                  <article className="customer-family-card account-holder">
+                    <div className="customer-family-avatar">{customer.name.slice(0, 1)}</div>
+                    <div><small>Account holder</small><h3>{customer.name}</h3><p>Uses your verified mobile number</p></div>
+                    <Link className="button button-secondary" href="/book">Book for {customer.firstName || customer.name.split(" ")[0]}</Link>
+                  </article>
+
+                  {(customer.dependents ?? []).map((dependent) => {
+                    const dependentName = [dependent.firstName, dependent.lastName].filter(Boolean).join(" ");
+                    const visits = appointments.filter((appointment) => appointment.recipientProfileId === dependent.id);
+                    return (
+                      <article className={`customer-family-card${dependent.active === false ? " inactive" : ""}`} key={dependent.id}>
+                        <div className="customer-family-avatar">{dependent.firstName.slice(0, 1)}</div>
+                        <div className="customer-family-details">
+                          <small>{dependent.relationship === "dependent" ? "Dependent" : "Child"}{dependent.active === false ? " · Inactive" : ""}</small>
+                          <h3>{dependentName}</h3>
+                          <p>{visits.length} {visits.length === 1 ? "visit" : "visits"} in their history</p>
+                        </div>
+                        {dependent.active !== false && <Link className="button button-secondary" href={`/book?recipient=${encodeURIComponent(dependent.id)}`}>Book for {dependent.firstName}</Link>}
+                        <details className="customer-family-edit">
+                          <summary>Edit profile</summary>
+                          <form className="portal-form" action={updateCustomerDependent}>
+                            <input type="hidden" name="dependentId" value={dependent.id} />
+                            <label>First name<input name="firstName" defaultValue={dependent.firstName} required maxLength={80} /></label>
+                            <label>Last name <small>Optional</small><input name="lastName" defaultValue={dependent.lastName ?? ""} maxLength={100} /></label>
+                            <label>Relationship<select name="relationship" defaultValue={dependent.relationship ?? "child"}><option value="child">Child</option><option value="dependent">Dependent</option></select></label>
+                            <label>Status<select name="active" defaultValue={dependent.active === false ? "false" : "true"}><option value="true">Active</option><option value="false">Inactive</option></select></label>
+                            <button className="button button-primary wide" type="submit">Save family profile</button>
+                          </form>
+                        </details>
+                      </article>
+                    );
+                  })}
+                </div>
+
+                <section className="customer-family-add">
+                  <div><p className="eyebrow">Add someone</p><h3>New family profile</h3><p>Children and dependents do not need their own phone number or email.</p></div>
+                  <form className="portal-form" action={addCustomerDependent}>
+                    <label>First name<input name="firstName" required maxLength={80} /></label>
+                    <label>Last name (optional)<input name="lastName" maxLength={100} /></label>
+                    <label className="wide">Relationship<select name="relationship" defaultValue="child"><option value="child">Child</option><option value="dependent">Dependent</option></select></label>
+                    <button className="button button-primary wide" type="submit">Add family member</button>
+                  </form>
+                </section>
               </>
             )}
 
@@ -150,6 +212,6 @@ export default async function CustomerDashboard({
           </section>
         </div>
       </div>
-    </main>
+
   );
 }

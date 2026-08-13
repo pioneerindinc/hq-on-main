@@ -8,6 +8,7 @@ import {
   updatePosAppointmentStatus,
 } from "@/app/actions/pos";
 import { PosBarberSelector } from "@/components/pos-barber-selector";
+import { AppointmentSchedule, normalizeScheduleDate } from "@/components/appointment-schedule";
 import { PosCashOutButton } from "@/components/pos-cash-out-button";
 import { PosDrawerReconciliation } from "@/components/pos-drawer-reconciliation";
 import { PosWalkInCheckout } from "@/components/pos-walk-in-checkout";
@@ -105,14 +106,15 @@ function appointmentPriceCents(appointment: PosAppointment, services: ServiceCat
 export default async function PosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; notice?: string; view?: string }>;
+  searchParams: Promise<{ error?: string; notice?: string; view?: string; scheduleDate?: string }>;
 }) {
-  const { error, notice, view } = await searchParams;
+  const { error, notice, view, scheduleDate } = await searchParams;
   const activeView = view === "cashout" ? "cashout" : "checkout";
   const currentBarber = await getCurrentPosBarber();
   const client = await getMongoClient();
   const db = client.db("hqonmain");
   const shopNow = currentShopDateTime();
+  const selectedScheduleDate = normalizeScheduleDate(scheduleDate, shopNow.date);
 
   if (!currentBarber) {
     const staff = await getStaffCollection();
@@ -156,7 +158,7 @@ export default async function PosPage({
     );
   }
 
-  const [appointments, dailySales, payouts, barbers, drawerCloseout] = await Promise.all([
+  const [appointments, dailySales, payouts, barbers, drawerCloseout, scheduleAppointments, scheduleAvailability] = await Promise.all([
     db.collection<PosAppointment>("appointments").find({
       $or: [{ barberId: currentBarber._id }, { barber: currentBarber.name }],
       requestedDate: shopNow.date,
@@ -170,7 +172,13 @@ export default async function PosPage({
     db.collection<CommissionPayout>("commissionPayouts").find({ businessDate: shopNow.date }).toArray(),
     (await getStaffCollection()).find({ role: "barber" }).sort({ name: 1 }).toArray(),
     db.collection<DrawerCloseout>("drawerCloseouts").findOne({ businessDate: shopNow.date }),
+    db.collection<PosAppointment>("appointments").find({ requestedDate: selectedScheduleDate }).sort({ requestedTime: 1 }).toArray(),
+    db.collection<AvailabilityRecord>("availability").find({ dayOfWeek: dayNumber(selectedScheduleDate) }).toArray(),
   ]);
+  const scheduleBarbers = barbers.filter((barber) => barber.active || scheduleAppointments.some((appointment) =>
+    appointment.barberId?.toString() === barber._id.toString() || appointment.barber === barber.name,
+  ));
+  const scheduleHours = new Map(scheduleAvailability.map((hours) => [hours.barberId.toString(), hours]));
   const serviceCatalog = await getServiceCatalog();
   const paidByBarber = new Map(
     payouts.map((payout) => [String(payout.barberId ?? ""), cents(payout.paidAmountCents)]),
@@ -267,8 +275,35 @@ export default async function PosPage({
           <div className="pos-checkout-workspace">
             <div className="pos-checkout-heading">
               <div><p className="eyebrow">Today&apos;s register</p><h1>Checkout</h1></div>
-              <p>Select a scheduled appointment below or record a walk-in cash service.</p>
             </div>
+
+        <AppointmentSchedule
+          date={selectedScheduleDate}
+          today={shopNow.date}
+          barbers={scheduleBarbers.map((barber) => ({ id: barber._id.toString(), name: barber.name }))}
+          appointments={scheduleAppointments.map((appointment) => {
+            const appointmentId = appointment._id.toString();
+            const belongsToCurrentBarber = appointment.barberId?.toString() === currentBarber._id.toString() || appointment.barber === currentBarber.name;
+            return {
+              id: appointmentId,
+              barberId: appointment.barberId?.toString(),
+              barber: text(appointment.barber),
+              name: text(appointment.name, "Guest"),
+              service: text(appointment.service),
+              time: text(appointment.requestedTime),
+              status: text(appointment.status, "pending"),
+              visitType: text(appointment.visitType, "appointment"),
+              href: belongsToCurrentBarber && selectedScheduleDate === shopNow.date ? `#pos-appointment-${appointmentId}` : undefined,
+            };
+          })}
+          hoursByBarber={Object.fromEntries(scheduleBarbers.map((barber) => [
+            barber._id.toString(),
+            scheduleHours.get(barber._id.toString()) ?? defaultHours(dayNumber(selectedScheduleDate)),
+          ]))}
+          basePath="/pos"
+          baseParams={{ view: "checkout" }}
+          emptyMessage="No appointments are scheduled at the shop for this day."
+        />
 
         <PosWalkInCheckout services={walkInServices} requiresAuditReason={Boolean(drawerCloseout)} />
 
@@ -286,7 +321,7 @@ export default async function PosPage({
               const isCompleted = status === "completed" && typeof appointment.checkoutAmountCents === "number";
               const canCheckout = ["pending", "confirmed", "completed"].includes(status) && !isCompleted;
               return (
-                <article className={`pos-appointment-card status-${status}`} key={appointment._id.toString()}>
+                <article className={`pos-appointment-card status-${status}`} id={`pos-appointment-${appointment._id.toString()}`} key={appointment._id.toString()}>
                   <div className="pos-appointment-time">
                     <strong>{displayTime(text(appointment.requestedTime, "--:--"))}</strong>
                     <span className="pos-status">{status}</span>

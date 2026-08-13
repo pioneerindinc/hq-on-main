@@ -77,6 +77,7 @@ export function BarberTotalsReport({
 
       <dl className="barber-totals-summary">
         <div><dt>Total register</dt><dd>{formatMoney(report.registerCents)}</dd></div>
+        <div><dt>Average ticket</dt><dd>{formatMoney(report.averageTicketCents)}</dd></div>
         <div className="earned"><dt>Commission earned</dt><dd>{formatMoney(report.commissionEarnedCents)}</dd></div>
         <div><dt>Cash paid out</dt><dd>{formatWholeDollarMoney(report.payoutCents)}</dd></div>
         <div><dt>Completed cuts</dt><dd>{report.completedCuts}</dd></div>
@@ -89,7 +90,7 @@ export function BarberTotalsReport({
           <header><div><h3>Daily breakdown</h3><p>Every day in this {report.period}.</p></div></header>
           <div className="barber-daily-table-wrap">
             <table className="barber-daily-table">
-              <thead><tr><th>Date</th><th>Cuts</th><th>Appts / walk-ins</th><th>Register</th><th>Commission</th><th>Paid out</th></tr></thead>
+              <thead><tr><th>Date</th><th>Cuts</th><th>Appts / walk-ins</th><th>Register</th><th>Avg. ticket</th><th>Commission</th><th>Paid out</th></tr></thead>
               <tbody>
                 {report.days.map((day) => (
                   <tr key={day.date}>
@@ -97,6 +98,7 @@ export function BarberTotalsReport({
                     <td>{day.completedCuts}</td>
                     <td>{day.appointments} / {day.walkIns}</td>
                     <td>{formatMoney(day.registerCents)}</td>
+                    <td>{formatMoney(day.averageTicketCents)}</td>
                     <td>{formatMoney(day.commissionEarnedCents)}</td>
                     <td>{formatWholeDollarMoney(day.payoutCents)}</td>
                   </tr>

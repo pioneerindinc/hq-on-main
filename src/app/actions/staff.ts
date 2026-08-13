@@ -14,7 +14,7 @@ import {
   normalizeTime,
 } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
-import { createAppointment, type BookingSource } from "@/lib/appointment-service";
+import { createAppointment, resolveAppointmentRecipient, type BookingSource } from "@/lib/appointment-service";
 import { resolveCustomer } from "@/lib/customer-identity";
 import { issueBarberSetupToken } from "@/lib/barber-setup";
 import { hasDrawerCloseout, recordPostCloseoutChange, type FinancialAuditChange } from "@/lib/financial-audit";
@@ -879,16 +879,26 @@ export async function updateAdminAppointment(formData: FormData) {
   }
   const commissionPercentage = Math.min(100, Math.max(0, Number(existing.commissionPercentageSnapshot ?? values.barber.commissionPercentage ?? 0)));
   const commissionAmountCents = checkoutAmountCents === null ? null : Math.round(checkoutAmountCents * commissionPercentage / 100);
+  const unchangedRecipient = String(existing.customerId ?? "") === customer._id.toString()
+    && String(existing.recipientName ?? existing.name ?? "").trim().toLocaleLowerCase() === values.name.trim().toLocaleLowerCase();
+  const recipient = await resolveAppointmentRecipient({
+    db,
+    customerId: customer._id,
+    requestedName: values.name,
+    requestedType: "self",
+    requestedProfileId: unchangedRecipient && typeof existing.recipientProfileId === "string" ? existing.recipientProfileId : undefined,
+  });
   const result = await db.collection("appointments").updateOne(
     { _id: new ObjectId(appointmentId) },
     {
       $set: {
-        name: values.name,
+        name: recipient.name,
         phone: customer.phone,
         email: values.email,
         customerId: customer._id,
-        recipientName: values.name,
-        recipientType: "self",
+        recipientName: recipient.name,
+        recipientType: recipient.type,
+        ...(recipient.profileId ? { recipientProfileId: recipient.profileId } : {}),
         service: values.serviceName,
         serviceId: values.serviceId,
         price: values.price,
@@ -906,6 +916,7 @@ export async function updateAdminAppointment(formData: FormData) {
         } : {}),
         updatedAt: new Date(),
       },
+      ...(!recipient.profileId ? { $unset: { recipientProfileId: "" } } : {}),
     },
   );
   if (!result.matchedCount) dashboardError("admin", "Appointment not found.", "appointments");

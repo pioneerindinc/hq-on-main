@@ -1833,6 +1833,49 @@ select {
   grid-row: 2;
 }
 .customer-signed-in .button { grid-column: 3; grid-row: 1; }
+.booking-recipient-picker {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 4px 0 0;
+  border: 0;
+  padding: 0;
+}
+.booking-recipient-picker legend {
+  width: 100%;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.booking-recipient-picker button {
+  display: flex;
+  min-width: 105px;
+  border: 1px solid #3b3b3b;
+  background: #181818;
+  color: white;
+  cursor: pointer;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 15px;
+  text-align: left;
+}
+.booking-recipient-picker button.active {
+  border-color: var(--red);
+  background: rgba(215, 24, 42, 0.13);
+}
+.booking-recipient-picker button strong { font-size: 0.75rem; }
+.booking-recipient-picker button small { color: var(--text-muted); }
+.booking-recipient-picker > a {
+  align-self: center;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 
 .booking-summary { position: sticky; top: 25px; border: 1px solid #303030; background: #101010; padding: 24px; }
 .booking-summary > p:first-child { margin: 0 0 20px; color: #777; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
@@ -2019,7 +2062,7 @@ select {
 }
 
 .customer-center-content {
-  padding-top: 75px;
+  padding-top: 145px;
   padding-bottom: 120px;
 }
 
@@ -2311,6 +2354,61 @@ select {
   color: var(--text-muted);
   font-size: 0.7rem;
 }
+
+.customer-appointment-recipient {
+  display: block;
+  margin: -1px 0 5px;
+  color: var(--red);
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.customer-family-intro {
+  max-width: 720px;
+  margin: -8px 0 25px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.65;
+}
+
+.customer-family-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.customer-family-card {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 17px;
+  border: 1px solid #303030;
+  background: #111;
+  padding: 18px;
+}
+
+.customer-family-card.inactive { opacity: 0.67; }
+.customer-family-avatar {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  background: var(--red);
+  color: white;
+  font-family: var(--font-display), Impact, sans-serif;
+  font-size: 1.7rem;
+}
+.customer-family-card small { color: var(--red); font-size: 0.58rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+.customer-family-card h3 { margin: 3px 0; font-family: var(--font-display), Impact, sans-serif; font-size: 1.55rem; font-weight: 400; text-transform: uppercase; }
+.customer-family-card p { margin: 0; color: var(--text-muted); font-size: 0.7rem; }
+.customer-family-card .button { padding: 10px 13px; }
+.customer-family-edit { grid-column: 1 / -1; border-top: 1px solid #292929; padding-top: 12px; }
+.customer-family-edit summary { color: var(--text-muted); cursor: pointer; font-size: 0.65rem; font-weight: 800; text-transform: uppercase; }
+.customer-family-edit .portal-form { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 16px; }
+.customer-family-add { display: grid; grid-template-columns: minmax(190px, 0.7fr) 1.3fr; gap: 28px; margin-top: 34px; border-top: 1px solid #343434; padding-top: 30px; }
+.customer-family-add h3 { margin: 0; font-family: var(--font-display), Impact, sans-serif; font-size: 2rem; font-weight: 400; text-transform: uppercase; }
+.customer-family-add > div > p:last-child { color: var(--text-muted); font-size: 0.72rem; line-height: 1.55; }
+.customer-family-add .portal-form { grid-template-columns: 1fr 1fr; }
 
 /* Staff authentication and operations */
 body:has(.auth-page) > .site-header,
@@ -5798,7 +5896,7 @@ body:has(.pos-page) {
 
 .barber-totals-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
   margin: 0;
   background: #353535;
@@ -5838,6 +5936,229 @@ body:has(.pos-page) {
   border: 1px solid #303030;
   background: #111;
   padding: 22px;
+}
+
+/* Shared appointment day schedule */
+.appointment-schedule {
+  margin-bottom: 38px;
+  border: 1px solid #343434;
+  background: #0d0d0d;
+}
+
+.appointment-schedule-toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  min-height: 70px;
+  align-items: center;
+  gap: 20px;
+  border-bottom: 1px solid #343434;
+  padding: 12px 16px;
+}
+
+.appointment-schedule-toolbar h3 {
+  margin: 0;
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+}
+
+.appointment-schedule-navigation {
+  display: flex;
+  gap: 7px;
+}
+
+.appointment-schedule-navigation a,
+.appointment-schedule-toolbar button {
+  display: inline-grid;
+  min-width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid #444;
+  background: #161616;
+  color: white;
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.appointment-schedule-navigation a:hover,
+.appointment-schedule-toolbar button:hover { border-color: var(--red); }
+
+.appointment-schedule-toolbar form {
+  display: flex;
+  justify-self: end;
+  align-items: end;
+  gap: 7px;
+}
+
+.appointment-schedule-toolbar label {
+  display: flex;
+  color: var(--text-muted);
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.appointment-schedule-toolbar input[type="date"] {
+  width: 145px;
+  height: 38px;
+  border: 1px solid #444;
+  background: #161616;
+  color: white;
+  color-scheme: dark;
+  padding: 0 9px;
+  font-size: 0.68rem;
+}
+
+.appointment-schedule-scroll {
+  max-height: 650px;
+  overflow: auto;
+}
+
+.appointment-schedule-grid {
+  display: grid;
+  min-width: max-content;
+}
+
+.appointment-schedule-head {
+  position: sticky;
+  z-index: 4;
+  top: 0;
+  background: #111;
+  box-shadow: 0 1px #3a3a3a;
+}
+
+.appointment-schedule-head > div {
+  display: flex;
+  min-height: 49px;
+  align-items: center;
+  gap: 9px;
+  border-left: 1px solid #353535;
+  padding: 8px 11px;
+}
+
+.appointment-schedule-head > div > span {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--red);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.appointment-schedule-head strong { font-size: 0.68rem; }
+.appointment-schedule-row > time {
+  display: block;
+  border-top: 1px solid #292929;
+  color: var(--text-muted);
+  padding: 8px 8px 0 0;
+  font-size: 0.58rem;
+  text-align: right;
+}
+
+.appointment-schedule-cell {
+  position: relative;
+  display: flex;
+  min-height: 54px;
+  border-top: 1px solid #292929;
+  border-left: 1px solid #353535;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px;
+}
+
+.appointment-schedule-cell.unavailable,
+.appointment-schedule-cell.break {
+  background: repeating-linear-gradient(-45deg, #111, #111 5px, #1b1b1b 5px, #1b1b1b 7px);
+}
+
+.appointment-schedule-cell.break > small {
+  margin: auto;
+  color: #8f8f8f;
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.schedule-event {
+  display: flex;
+  min-height: 47px;
+  border-left: 4px solid #ff8d96;
+  border-radius: 4px;
+  background: #b41625;
+  color: white;
+  flex-direction: column;
+  justify-content: center;
+  padding: 5px 9px;
+  text-decoration: none;
+}
+
+.schedule-event:hover { filter: brightness(1.12); }
+.schedule-event > span { font-size: 0.54rem; font-weight: 800; }
+.schedule-event > strong { overflow: hidden; font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-event > small { overflow: hidden; color: #f1bec3; font-size: 0.55rem; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-event.status-pending { border-left-color: #ffd18a; background: #8b5712; }
+.schedule-event.status-completed { border-left-color: #8ee4ae; background: #235b37; }
+
+.appointment-schedule-empty {
+  margin: 0;
+  border-top: 1px solid #2d2d2d;
+  color: var(--text-muted);
+  padding: 15px;
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.appointment-schedule-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  border-top: 1px solid #343434;
+  color: var(--text-muted);
+  padding: 11px 15px;
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+.appointment-schedule-legend span::before {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--red);
+  content: "";
+}
+.appointment-schedule-legend .pending::before { background: #b8781e; }
+.appointment-schedule-legend .completed::before { background: #3c995b; }
+.appointment-schedule-legend .break::before { background: #666; }
+
+@media (max-width: 700px) {
+  .appointment-schedule-toolbar {
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+  }
+
+  .appointment-schedule-toolbar h3 {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    text-align: center;
+  }
+
+  .appointment-schedule-navigation { grid-column: 1 / -1; grid-row: 2; justify-content: center; }
+  .appointment-schedule-toolbar form { grid-column: 1 / -1; grid-row: 3; width: 100%; }
+  .appointment-schedule-toolbar label { flex: 1; }
+  .appointment-schedule-toolbar input[type="date"] { width: 100%; }
+  .appointment-schedule-toolbar form button { min-width: 58px; }
+  .appointment-schedule-scroll { max-height: 560px; }
 }
 
 .barber-totals-panel > header {
@@ -6190,6 +6511,214 @@ body:has(.pos-page) {
   margin-top: 4px;
   color: #777;
   font-size: 0.62rem;
+}
+
+/* Admin financial ledger and statements */
+.financial-dashboard { min-width: 0; }
+.financial-scope-note {
+  margin: -8px 0 22px;
+  border-left: 3px solid #777;
+  background: #161616;
+  color: var(--text-muted);
+  padding: 12px 15px;
+  font-size: 0.69rem;
+  line-height: 1.55;
+}
+.financial-view-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 20px;
+  border: 1px solid #373737;
+  background: #151515;
+}
+.financial-view-tabs a {
+  border-right: 1px solid #373737;
+  color: var(--text-muted);
+  padding: 13px 10px;
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+.financial-view-tabs a:last-child { border-right: 0; }
+.financial-view-tabs a:hover,
+.financial-view-tabs a.active { background: var(--red); color: white; }
+.financial-date-controls,
+.financial-account-switcher {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.financial-date-controls label,
+.financial-account-switcher label {
+  display: flex;
+  min-width: 145px;
+  color: var(--text-subtle);
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.financial-date-controls input,
+.financial-account-switcher select,
+.financial-date-controls button,
+.financial-account-switcher button {
+  height: 42px;
+  border: 1px solid #404040;
+  outline: 0;
+  background: #101010;
+  color: white;
+  color-scheme: dark;
+  padding: 0 11px;
+  font-size: 0.68rem;
+}
+.financial-date-controls button,
+.financial-account-switcher button {
+  border-color: var(--red);
+  background: var(--red);
+  cursor: pointer;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.financial-ledger-summary {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: 1px;
+  margin-bottom: 18px;
+  background: #383838;
+}
+.financial-ledger-summary > div {
+  display: flex;
+  min-height: 90px;
+  justify-content: center;
+  background: #111;
+  flex-direction: column;
+  padding: 17px;
+}
+.financial-ledger-summary small { color: var(--text-subtle); font-size: 0.55rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+.financial-ledger-summary strong { margin-top: 7px; font-family: var(--font-display), Impact, sans-serif; font-size: 1.75rem; font-weight: 400; text-transform: uppercase; }
+.financial-account-switcher label { min-width: min(330px, 100%); }
+.financial-entry-composer {
+  margin: 24px 0;
+  border: 1px solid #383838;
+  background: #111;
+}
+.financial-entry-composer > summary {
+  cursor: pointer;
+  padding: 16px 18px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.financial-entry-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid #303030;
+  padding: 20px;
+}
+.financial-form-help { margin: 0; color: var(--text-muted); font-size: 0.68rem; line-height: 1.55; }
+.financial-ledger-table-wrap { overflow-x: auto; border: 1px solid #383838; }
+.financial-ledger-table { width: 100%; min-width: 800px; border-collapse: collapse; }
+.financial-ledger-table th {
+  background: #171717;
+  color: var(--text-subtle);
+  padding: 12px;
+  font-size: 0.54rem;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+.financial-ledger-table td { border-top: 1px solid #303030; padding: 13px 12px; color: var(--text-muted); font-size: 0.65rem; vertical-align: top; }
+.financial-ledger-table td > strong { color: white; }
+.financial-ledger-table td > small { display: block; margin-top: 4px; }
+.financial-ledger-table td.money-in { color: #8ee4ae; font-weight: 900; }
+.financial-ledger-table td.money-out { color: #ef6f7a; font-weight: 900; }
+.financial-ledger-table tr.reversed { opacity: 0.7; }
+.financial-ledger-table td:last-child > span { display: block; margin-top: 5px; color: #d9b15f; font-size: 0.56rem; font-weight: 900; text-transform: uppercase; }
+.financial-ledger-table details summary { margin-top: 6px; color: #ef9da5; cursor: pointer; font-size: 0.56rem; font-weight: 800; text-transform: uppercase; }
+.financial-ledger-table details form { display: flex; gap: 5px; margin-top: 7px; }
+.financial-ledger-table details input { min-width: 150px; height: 34px; border: 1px solid #444; background: #0b0b0b; color: white; padding: 0 8px; font-size: 0.62rem; }
+.financial-ledger-table details button { border: 1px solid #9e2732; background: #641922; color: white; cursor: pointer; padding: 0 8px; font-size: 0.55rem; font-weight: 800; text-transform: uppercase; }
+.financial-statement {
+  max-width: 780px;
+  margin: 30px auto 0;
+  border: 1px solid #383838;
+  background: #111;
+  padding: clamp(22px, 5vw, 45px);
+}
+.financial-statement > header { border-bottom: 2px solid #555; margin-bottom: 28px; padding-bottom: 23px; text-align: center; }
+.financial-statement > header .eyebrow { justify-content: center; margin-bottom: 7px; }
+.financial-statement > header h3 { margin: 0; font-family: var(--font-display), Impact, sans-serif; font-size: 3rem; font-weight: 400; text-transform: uppercase; }
+.financial-statement > header span { color: var(--text-muted); font-size: 0.68rem; }
+.financial-statement > section { margin-top: 25px; }
+.financial-statement > section h4 { margin: 0 0 8px; border-bottom: 1px solid #333; padding-bottom: 8px; font-size: 0.72rem; text-transform: uppercase; }
+.financial-statement > section > p { color: var(--text-muted); font-size: 0.67rem; }
+.financial-statement-row,
+.financial-statement-total { display: flex; justify-content: space-between; gap: 25px; padding: 8px 5px; font-size: 0.7rem; }
+.financial-statement-row span { color: var(--text-muted); }
+.financial-statement-row.group { margin-top: 4px; font-weight: 900; }
+.financial-statement-row.group span { color: white; }
+.financial-statement-row.subaccount { margin-left: 20px; border-left: 2px solid #3b3b3b; padding-left: 12px; }
+.financial-statement-row.subaccount span::before { color: var(--red); content: "↳ "; }
+.financial-statement-total { border-top: 1px solid #555; margin-top: 7px; padding-top: 11px; }
+.financial-statement-total.net { border-top: 3px double #888; margin-top: 30px; color: white; font-size: 0.85rem; }
+.financial-balance-check { margin: 25px 0 0; border: 1px solid #8e343d; background: rgba(215, 24, 42, 0.09); color: #ef9da5; padding: 11px; font-size: 0.66rem; text-align: center; }
+.financial-balance-check.balanced { border-color: #356a49; background: rgba(65, 152, 93, 0.09); color: #8ee4ae; }
+.financial-contractor-summary { margin-top: 38px !important; border-top: 2px solid #555; padding-top: 25px; }
+.financial-contractor-summary > p { color: var(--text-muted); line-height: 1.55; }
+.financial-contractor-table-wrap { margin-top: 15px; overflow-x: auto; }
+.financial-contractor-summary table { width: 100%; min-width: 600px; border-collapse: collapse; }
+.financial-contractor-summary th { color: var(--text-subtle); padding: 9px; font-size: 0.52rem; letter-spacing: 0.07em; text-align: right; text-transform: uppercase; }
+.financial-contractor-summary th:first-child { text-align: left; }
+.financial-contractor-summary td { border-top: 1px solid #333; padding: 11px 9px; font-size: 0.66rem; text-align: right; }
+.financial-contractor-summary td:first-child { text-align: left; }
+.financial-contractor-summary td small { display: block; margin-top: 3px; color: var(--text-subtle); font-size: 0.52rem; }
+.financial-contractor-summary td.matched { color: #8ee4ae; }
+.financial-contractor-summary td.different { color: #efbd73; }
+.financial-tax-note { display: block; margin-top: 14px; color: var(--text-subtle); font-size: 0.56rem; line-height: 1.5; }
+.financial-accounts-layout { display: grid; grid-template-columns: 1.25fr 0.75fr; align-items: start; gap: 25px; }
+.financial-accounts-list { border: 1px solid #383838; background: #111; padding: 20px; }
+.financial-accounts-list > header { display: flex; justify-content: space-between; border-bottom: 1px solid #383838; margin-bottom: 18px; padding-bottom: 14px; }
+.financial-accounts-list > header h3,
+.financial-new-account h3 { margin: 0; font-family: var(--font-display), Impact, sans-serif; font-size: 1.8rem; font-weight: 400; text-transform: uppercase; }
+.financial-accounts-list > header span { color: var(--red); font-family: var(--font-display), Impact, sans-serif; font-size: 1.7rem; }
+.financial-accounts-list section { margin-top: 18px; }
+.financial-accounts-list section h4 { margin: 0 0 7px; color: var(--text-subtle); font-size: 0.58rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.financial-accounts-list section > div { display: grid; grid-template-columns: 55px 1fr auto; gap: 10px; border-top: 1px solid #2b2b2b; padding: 9px 2px; font-size: 0.66rem; }
+.financial-accounts-list section > div.subaccount { margin-left: 20px; border-left: 2px solid #3b3b3b; padding-left: 10px; }
+.financial-accounts-list code { color: var(--red); }
+.financial-accounts-list section span { color: var(--text-muted); font-size: 0.55rem; text-transform: uppercase; }
+.financial-new-account { position: sticky; top: 20px; grid-template-columns: 1fr 1fr; border: 1px solid #383838; background: #111; padding: 20px; }
+
+@media (max-width: 850px) {
+  .financial-accounts-layout { grid-template-columns: 1fr; }
+  .financial-new-account { position: static; }
+}
+
+@media (max-width: 700px) {
+  .financial-view-tabs { grid-template-columns: 1fr 1fr; }
+  .financial-view-tabs a:nth-child(2) { border-right: 0; }
+  .financial-view-tabs a:nth-child(-n + 2) { border-bottom: 1px solid #373737; }
+  .financial-date-controls,
+  .financial-account-switcher { display: grid; grid-template-columns: 1fr; }
+  .financial-date-controls label,
+  .financial-account-switcher label { min-width: 0; }
+  .financial-date-controls input,
+  .financial-account-switcher select,
+  .financial-date-controls button,
+  .financial-account-switcher button { width: 100%; }
+  .financial-ledger-summary { grid-template-columns: 1fr; }
+  .financial-ledger-summary > div { min-height: 74px; }
+  .financial-entry-form,
+  .financial-new-account { grid-template-columns: 1fr; }
+  .financial-entry-form .wide,
+  .financial-new-account .wide { grid-column: auto; }
+  .financial-statement > header h3 { font-size: 2.3rem; }
+  .financial-accounts-list section > div { grid-template-columns: 50px 1fr; }
+  .financial-accounts-list section span { grid-column: 2; }
 }
 
 .staff-edit-grid {
@@ -6741,6 +7270,14 @@ body:has(.pos-page) {
     grid-row: auto;
   }
 
+  .booking-recipient-picker {
+    grid-column: 1 / -1;
+  }
+
+  .booking-recipient-picker button {
+    flex: 1 1 100px;
+  }
+
   .booking-confirmation {
     padding: 40px 18px;
   }
@@ -6773,7 +7310,7 @@ body:has(.pos-page) {
   }
 
   .customer-center-content {
-    padding-top: 55px;
+    padding-top: 116px;
     padding-bottom: 80px;
   }
 
@@ -6832,6 +7369,20 @@ body:has(.pos-page) {
 
   .customer-profile-form .wide {
     grid-column: auto;
+  }
+
+  .customer-family-card {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .customer-family-card > .button {
+    grid-column: 1 / -1;
+  }
+
+  .customer-family-edit .portal-form,
+  .customer-family-add,
+  .customer-family-add .portal-form {
+    grid-template-columns: 1fr;
   }
 
   .auth-panel {

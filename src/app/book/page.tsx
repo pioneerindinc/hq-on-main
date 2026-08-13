@@ -9,7 +9,8 @@ export const metadata: Metadata = {
   description: "Choose your service, barber, and appointment time at HQ on Main.",
 };
 
-export default async function BookPage() {
+export default async function BookPage({ searchParams }: { searchParams: Promise<{ recipient?: string }> }) {
   const services = await getServiceCatalog();
-  return <BookingFlow services={services} />;
+  const { recipient } = await searchParams;
+  return <BookingFlow services={services} initialRecipientId={recipient} />;
 }

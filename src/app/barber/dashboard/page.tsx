@@ -9,6 +9,7 @@ import {
 import { updateBarberAccount } from "@/app/actions/barber-account";
 import { BarberAddAppointmentForm } from "@/components/barber-add-appointment-form";
 import { BarberTotalsReport } from "@/components/barber-totals-report";
+import { AppointmentSchedule, normalizeScheduleDate } from "@/components/appointment-schedule";
 import { StaffHeader } from "@/components/staff-header";
 import { requireStaffRole } from "@/lib/auth";
 import {
@@ -18,7 +19,7 @@ import {
   normalizeTotalsPeriod,
   totalsRange,
 } from "@/lib/barber-totals";
-import { currentShopDateTime, defaultHours } from "@/lib/booking";
+import { currentShopDateTime, dayNumber, defaultHours } from "@/lib/booking";
 import { getMongoClient } from "@/lib/mongodb";
 import { getServiceCatalog } from "@/lib/services";
 
@@ -91,25 +92,26 @@ function isDashboardTab(value?: string): value is DashboardTab {
 export default async function BarberDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string; tab?: string; period?: string; date?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; tab?: string; period?: string; date?: string; scheduleDate?: string }>;
 }) {
   const barber = await requireStaffRole("barber");
   const client = await getMongoClient();
   const db = client.db("hqonmain");
   const serviceCatalog = await getServiceCatalog();
-  const { error, success, tab, period, date } = await searchParams;
+  const { error, success, tab, period, date, scheduleDate } = await searchParams;
   const activeTab: DashboardTab = isDashboardTab(tab) ? tab : "totals";
   const barberAppointmentFilter = { $or: [{ barberId: barber._id }, { barber: barber.name }] };
   const today = currentShopDateTime().date;
+  const selectedScheduleDate = normalizeScheduleDate(scheduleDate, today);
   const selectedPeriod = normalizeTotalsPeriod(period);
   const selectedDate = normalizeTotalsDate(date, today);
   const selectedRange = totalsRange(selectedPeriod, selectedDate);
-  const [availabilityRows, appointments, activeAppointmentSlots, performanceSales, performancePayouts] = await Promise.all([
+  const [availabilityRows, appointments, activeAppointmentSlots, performanceSales, performancePayouts, scheduleAppointments] = await Promise.all([
     db.collection<Availability>("availability").find({ barberId: barber._id }).toArray(),
     db.collection<Appointment>("appointments")
       .find(barberAppointmentFilter)
-      .sort({ requestedDate: 1, requestedTime: 1 })
-      .limit(100)
+      .sort({ requestedDate: -1, requestedTime: -1 })
+      .limit(250)
       .toArray(),
     db.collection<Appointment>("appointments")
       .find({
@@ -129,6 +131,10 @@ export default async function BarberDashboard({
       barberId: barber._id,
       businessDate: { $gte: selectedRange.start, $lte: selectedRange.end },
     }).toArray(),
+    db.collection<Appointment>("appointments").find({
+      ...barberAppointmentFilter,
+      requestedDate: selectedScheduleDate,
+    }).sort({ requestedTime: 1 }).toArray(),
   ]);
   const availability = new Map(availabilityRows.map((row) => [row.day, row]));
   const selectedServices = barber.services ?? serviceCatalog.map((service) => service.id);
@@ -204,7 +210,6 @@ export default async function BarberDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Your account</h2></div>
-                  <p>Only you choose your password, register PIN, phone number, and notification preference.</p>
                 </div>
                 <form className="portal-form portal-form-grid barber-account-form" action={updateBarberAccount}>
                   <label>Mobile phone <small>Optional</small><input name="phone" type="tel" autoComplete="tel" defaultValue={barber.phone ?? ""} placeholder="(317) 555-0123" /></label>
@@ -228,7 +233,6 @@ export default async function BarberDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Your totals</h2></div>
-                  <p>Completed cash sales and recorded commission payouts.</p>
                 </div>
                 <BarberTotalsReport report={totalsReport} today={today} />
               </section>
@@ -279,7 +283,6 @@ export default async function BarberDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Your services</h2></div>
-                  <p>Select every service guests can book with you.</p>
                 </div>
                 <form className="service-selector" action={saveBarberServices}>
                   {serviceCatalog.map((service) => (
@@ -301,7 +304,6 @@ export default async function BarberDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Add appointment</h2></div>
-                  <p>Add a phone, walk-in, or in-shop booking.</p>
                 </div>
                 <BarberAddAppointmentForm
                   bookedSlots={bookedSlots}
@@ -315,12 +317,33 @@ export default async function BarberDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Appointments</h2></div>
-                  <p>Update timing, status, and notes.</p>
                 </div>
+                <AppointmentSchedule
+                  date={selectedScheduleDate}
+                  today={today}
+                  barbers={[{ id: barber._id.toString(), name: barber.name }]}
+                  appointments={scheduleAppointments.map((appointment) => ({
+                    id: appointment._id.toString(),
+                    barberId: barber._id.toString(),
+                    barber: barber.name,
+                    name: appointment.name ?? "Guest",
+                    service: appointment.service,
+                    time: appointment.requestedTime ?? "",
+                    status: appointment.status,
+                    visitType: appointment.visitType,
+                    href: `#appointment-${appointment._id.toString()}`,
+                  }))}
+                  hoursByBarber={{
+                    [barber._id.toString()]: availability.get(days[dayNumber(selectedScheduleDate) - 1]) ?? defaultHours(dayNumber(selectedScheduleDate)),
+                  }}
+                  basePath="/barber/dashboard"
+                  baseParams={{ tab: "appointments" }}
+                  emptyMessage="You have no appointments scheduled for this day."
+                />
                 <div className="appointment-list">
                   {appointments.length === 0 && <p className="portal-empty">No appointments assigned yet.</p>}
                   {appointments.map((appointment) => (
-                    <form className="appointment-card" action={updateBarberAppointment} key={appointment._id.toString()}>
+                    <form className="appointment-card" id={`appointment-${appointment._id.toString()}`} action={updateBarberAppointment} key={appointment._id.toString()}>
                       <input type="hidden" name="appointmentId" value={appointment._id.toString()} />
                       <div className="appointment-person">
                         <span>{(appointment.name ?? "?").slice(0, 1)}</span>

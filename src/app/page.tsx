@@ -38,17 +38,6 @@ export default function Home() {
             </Link>
           </div>
         </div>
-        <div className="hero-meta">
-          <div className="container hero-meta-inner">
-            <p>
-              <span>Mon–Fri</span> 8:30am–6:30pm
-            </p>
-            <p>
-              <span>Saturday</span> 8:30am–2pm
-            </p>
-            <p className="hero-meta-address">100 E. Main Street · Plainfield</p>
-          </div>
-        </div>
       </section>
 
     </main>

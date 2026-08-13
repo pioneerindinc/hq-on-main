@@ -36,6 +36,7 @@ export async function POST(request: Request) {
       lastName: customer.lastName || lastName,
       phone: customer.phone,
       email: customer.email || "",
+      dependents: [],
     } });
   } catch (error) {
     console.error("Customer profile completion failed", error);

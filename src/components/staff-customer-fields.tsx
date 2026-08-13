@@ -42,10 +42,10 @@ export function StaffCustomerFields({
 
   return <>
     <label>Phone
-      <span className="staff-phone-lookup"><input name="phone" type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} required /><button className="button button-secondary" type="button" disabled={loading || !phone.trim()} onClick={lookup}>{loading ? "Finding…" : "Find customer"}</button></span>
+      <span className="staff-phone-lookup"><input name="phone" type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} required /><button className="button button-primary" type="button" disabled={loading || !phone.trim()} onClick={lookup}>{loading ? "Finding…" : "Find customer"}</button></span>
       {status && <small role="status">{status}</small>}
     </label>
     <label>Guest name<input name="name" value={name} onChange={(event) => setName(event.target.value)} required minLength={2} /></label>
-    <label>Email <small>Optional</small><input name="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+    <label>Email (optional)<input name="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
   </>;
 }

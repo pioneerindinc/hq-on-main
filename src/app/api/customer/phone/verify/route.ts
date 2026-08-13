@@ -40,12 +40,20 @@ export async function POST(request: Request) {
   }
 }
 
-function safeCustomer(customer: { firstName?: string; lastName?: string; name: string; phone: string; email?: string }) {
+function safeCustomer(customer: { firstName?: string; lastName?: string; name: string; phone: string; email?: string; dependents?: Array<{ id: string; firstName: string; lastName?: string; relationship?: string; active: boolean }> }) {
   return {
     name: customerDisplayName(customer),
     firstName: customer.firstName || customerDisplayName(customer).split(/\s+/)[0] || "",
     lastName: customer.lastName || customerDisplayName(customer).split(/\s+/).slice(1).join(" "),
     phone: customer.phone,
     email: customer.email || "",
+    dependents: (customer.dependents ?? [])
+      .filter((dependent) => dependent.active !== false)
+      .map((dependent) => ({
+        id: dependent.id,
+        firstName: dependent.firstName,
+        lastName: dependent.lastName || "",
+        relationship: dependent.relationship === "dependent" ? "dependent" : "child",
+      })),
   };
 }

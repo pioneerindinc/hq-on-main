@@ -12,7 +12,7 @@ type Slot = { value: string; label: string };
 type Customer = PhoneCustomer;
 type Confirmation = {
   confirmationId: string;
-  appointment: { service: string; price: string; barber: string; date: string; time: string };
+  appointment: { service: string; price: string; barber: string; date: string; time: string; recipientName: string };
 };
 
 const steps = ["Service", "Barber", "Day & time", "Your info", "Confirmation"];
@@ -41,7 +41,7 @@ function localDateValue(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-export function BookingFlow({ services }: { services: ServiceCatalogItem[] }) {
+export function BookingFlow({ services, initialRecipientId }: { services: ServiceCatalogItem[]; initialRecipientId?: string }) {
   const [step, setStep] = useState(0);
   const [serviceId, setServiceId] = useState("");
   const [barber, setBarber] = useState<Barber | null>(null);
@@ -52,6 +52,7 @@ export function BookingFlow({ services }: { services: ServiceCatalogItem[] }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [customer, setCustomer] = useState<Customer | null>(null);
+  const [recipientProfileId, setRecipientProfileId] = useState("self");
   const [smsConsent, setSmsConsent] = useState(false);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -83,13 +84,22 @@ export function BookingFlow({ services }: { services: ServiceCatalogItem[] }) {
     ];
   }, [calendarMonth]);
   const service = services.find((item) => item.id === serviceId);
+  const selectedDependent = customer?.dependents.find((dependent) => dependent.id === recipientProfileId);
+  const recipientName = selectedDependent
+    ? [selectedDependent.firstName, selectedDependent.lastName].filter(Boolean).join(" ")
+    : customer?.name ?? "Not selected";
 
   useEffect(() => {
     fetch("/api/customer/me")
       .then((response) => response.json())
-      .then((data: { customer: Customer | null }) => setCustomer(data.customer))
+      .then((data: { customer: Customer | null }) => {
+        setCustomer(data.customer);
+        if (initialRecipientId && data.customer?.dependents.some((dependent) => dependent.id === initialRecipientId)) {
+          setRecipientProfileId(initialRecipientId);
+        }
+      })
       .catch(() => undefined);
-  }, []);
+  }, [initialRecipientId]);
 
   useEffect(() => {
     if (!serviceId) return;
@@ -142,7 +152,7 @@ export function BookingFlow({ services }: { services: ServiceCatalogItem[] }) {
     setStep(index);
   }
 
-  async function completeBooking() {
+  async function completeBooking(selectedRecipientId = recipientProfileId) {
     setLoading(true);
     setMessage("");
     try {
@@ -155,6 +165,7 @@ export function BookingFlow({ services }: { services: ServiceCatalogItem[] }) {
           date,
           time,
           smsConsent,
+          recipientProfileId: selectedRecipientId === "self" ? null : selectedRecipientId,
         }),
       });
       const data = await response.json();
@@ -311,7 +322,19 @@ export function BookingFlow({ services }: { services: ServiceCatalogItem[] }) {
                 {customer ? (
                   <div className="customer-signed-in">
                     <span>{customer.name.slice(0, 1)}</span>
-                    <div><small>Booking as</small><h3>{customer.name}</h3><p>{customer.phone}{customer.email ? ` · ${customer.email}` : ""}</p></div>
+                    <div><small>Verified account</small><h3>{customer.name}</h3><p>{customer.phone}{customer.email ? ` · ${customer.email}` : ""}</p></div>
+                    <fieldset className="booking-recipient-picker">
+                      <legend>Book for</legend>
+                      <button className={recipientProfileId === "self" ? "active" : ""} type="button" onClick={() => setRecipientProfileId("self")}>
+                        <strong>{customer.firstName || customer.name.split(" ")[0]}</strong><small>Myself</small>
+                      </button>
+                      {customer.dependents.map((dependent) => (
+                        <button className={recipientProfileId === dependent.id ? "active" : ""} type="button" onClick={() => setRecipientProfileId(dependent.id)} key={dependent.id}>
+                          <strong>{dependent.firstName}</strong><small>{dependent.relationship === "dependent" ? "Dependent" : "Child"}</small>
+                        </button>
+                      ))}
+                      <Link href="/customer/dashboard?tab=family">Manage family profiles</Link>
+                    </fieldset>
                     <SmsConsent checked={smsConsent} onChange={setSmsConsent} />
                     <button className="button button-primary" disabled={loading} onClick={() => completeBooking()} type="button">
                       {loading ? "Confirming…" : "Confirm appointment"}
@@ -322,7 +345,11 @@ export function BookingFlow({ services }: { services: ServiceCatalogItem[] }) {
                     <SmsConsent checked={smsConsent} onChange={setSmsConsent} />
                     <PhoneAuthFlow onAuthenticated={async (verifiedCustomer) => {
                       setCustomer(verifiedCustomer);
-                      await completeBooking();
+                      const requestedDependent = initialRecipientId && verifiedCustomer.dependents.some((dependent) => dependent.id === initialRecipientId)
+                        ? initialRecipientId
+                        : "self";
+                      setRecipientProfileId(requestedDependent);
+                      if (verifiedCustomer.dependents.length === 0) await completeBooking("self");
                     }} />
                   </div>
                 )}
@@ -339,6 +366,7 @@ export function BookingFlow({ services }: { services: ServiceCatalogItem[] }) {
                   <span><small>Barber</small><strong>{confirmation.appointment.barber}</strong></span>
                   <span><small>Date</small><strong>{formatDisplayDate(confirmation.appointment.date)}</strong></span>
                   <span><small>Time</small><strong>{displayTime(confirmation.appointment.time)}</strong></span>
+                  <span><small>Appointment for</small><strong>{confirmation.appointment.recipientName}</strong></span>
                 </div>
                 <Link className="button button-outline" href="/">Back to homepage</Link>
               </div>
@@ -353,6 +381,7 @@ export function BookingFlow({ services }: { services: ServiceCatalogItem[] }) {
                 <div><dt>Barber</dt><dd>{barber?.name ?? "Not selected"}</dd></div>
                 <div><dt>Date</dt><dd>{date ? formatDisplayDate(date) : "Not selected"}</dd></div>
                 <div><dt>Time</dt><dd>{time ? displayTime(time) : "Not selected"}</dd></div>
+                {customer && <div><dt>Book for</dt><dd>{recipientName}</dd></div>}
               </dl>
               <p className="summary-note">HQ is cash only. An ATM is available in the shop.</p>
             </aside>

@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { ObjectId } from "mongodb";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -52,11 +53,82 @@ export async function updateCustomerProfile(formData: FormData) {
         customerId: customer._id,
         status: { $in: ["pending", "confirmed"] },
       },
-      { $set: { name, phone: customer.phone, email, updatedAt: new Date() } },
+      { $set: { phone: customer.phone, email, updatedAt: new Date() } },
+    );
+  await client
+    .db("hqonmain")
+    .collection("appointments")
+    .updateMany(
+      {
+        customerId: customer._id,
+        recipientType: { $ne: "dependent" },
+        status: { $in: ["pending", "confirmed"] },
+      },
+      { $set: { name, recipientName: name, updatedAt: new Date() } },
     );
 
   revalidatePath("/customer/dashboard");
   centerMessage("profile", "success", "Profile updated.");
+}
+
+export async function addCustomerDependent(formData: FormData) {
+  const customer = await requireCustomer();
+  const firstName = value(formData, "firstName");
+  const lastName = value(formData, "lastName");
+  const relationship = value(formData, "relationship") === "dependent" ? "dependent" : "child";
+  if (firstName.length < 1 || firstName.length > 80 || lastName.length > 100) {
+    centerMessage("family", "error", "Enter a valid name for this family member.");
+  }
+  const now = new Date();
+  const customers = await getCustomerCollection();
+  await customers.updateOne(
+    { _id: customer._id },
+    {
+      $push: {
+        dependents: {
+          id: randomUUID(),
+          firstName,
+          lastName,
+          relationship,
+          active: true,
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      $set: { updatedAt: now },
+    },
+  );
+  revalidatePath("/customer/dashboard");
+  centerMessage("family", "success", `${firstName} was added to your family.`);
+}
+
+export async function updateCustomerDependent(formData: FormData) {
+  const customer = await requireCustomer();
+  const dependentId = value(formData, "dependentId");
+  const firstName = value(formData, "firstName");
+  const lastName = value(formData, "lastName");
+  const relationship = value(formData, "relationship") === "dependent" ? "dependent" : "child";
+  const active = value(formData, "active") !== "false";
+  if (!dependentId || firstName.length < 1 || firstName.length > 80 || lastName.length > 100) {
+    centerMessage("family", "error", "Enter valid family profile details.");
+  }
+  const customers = await getCustomerCollection();
+  const result = await customers.updateOne(
+    { _id: customer._id, "dependents.id": dependentId },
+    {
+      $set: {
+        "dependents.$.firstName": firstName,
+        "dependents.$.lastName": lastName,
+        "dependents.$.relationship": relationship,
+        "dependents.$.active": active,
+        "dependents.$.updatedAt": new Date(),
+        updatedAt: new Date(),
+      },
+    },
+  );
+  if (!result.matchedCount) centerMessage("family", "error", "That family profile was not found.");
+  revalidatePath("/customer/dashboard");
+  centerMessage("family", "success", `${firstName}'s profile was updated.`);
 }
 
 export async function cancelCustomerAppointment(formData: FormData) {

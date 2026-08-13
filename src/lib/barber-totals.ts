@@ -32,6 +32,7 @@ export type TotalsRange = {
 
 export type BarberTotalsReport = TotalsRange & {
   registerCents: number;
+  averageTicketCents: number;
   commissionEarnedCents: number;
   payoutCents: number;
   completedCuts: number;
@@ -40,6 +41,7 @@ export type BarberTotalsReport = TotalsRange & {
   days: Array<{
     date: string;
     registerCents: number;
+    averageTicketCents: number;
     commissionEarnedCents: number;
     payoutCents: number;
     completedCuts: number;
@@ -161,8 +163,10 @@ function isWalkIn(sale: BarberTotalsSale) {
 
 function sumSales(sales: BarberTotalsSale[]) {
   const walkIns = sales.filter(isWalkIn).length;
+  const registerCents = sales.reduce((total, sale) => total + cents(sale.checkoutAmountCents), 0);
   return {
-    registerCents: sales.reduce((total, sale) => total + cents(sale.checkoutAmountCents), 0),
+    registerCents,
+    averageTicketCents: sales.length ? Math.round(registerCents / sales.length) : 0,
     commissionEarnedCents: sales.reduce((total, sale) => total + cents(sale.commissionAmountCents), 0),
     completedCuts: sales.length,
     appointments: sales.length - walkIns,

@@ -12,8 +12,10 @@ import {
   updateService,
 } from "@/app/actions/staff";
 import { AdminServiceDeleteButton } from "@/components/admin-service-delete-button";
+import { AppointmentSchedule, normalizeScheduleDate } from "@/components/appointment-schedule";
 import { BarberTotalsReport } from "@/components/barber-totals-report";
 import { BarberSetupLink } from "@/components/barber-setup-link";
+import { FinancialDashboardPanel, type FinancialView } from "@/components/financial-dashboard";
 import { StaffHeader } from "@/components/staff-header";
 import { StaffCustomerFields } from "@/components/staff-customer-fields";
 import { getStaffCollection, requireStaffRole } from "@/lib/auth";
@@ -25,10 +27,11 @@ import {
   normalizeTotalsPeriod,
   totalsRange,
 } from "@/lib/barber-totals";
-import { currentShopDateTime, displayTime, formatDisplayDate, normalizeTime } from "@/lib/booking";
+import { currentShopDateTime, dayNumber, defaultHours, displayTime, formatDisplayDate, normalizeTime, type DailyHours } from "@/lib/booking";
 import { barberPhotoUrl } from "@/lib/barber-profile";
 import { getCustomerCollection } from "@/lib/customer-auth";
 import { getMongoClient } from "@/lib/mongodb";
+import { getFinancialDashboard } from "@/lib/financial-ledger";
 import { formatMoney, formatWholeDollarMoney, roundCashPayoutCents } from "@/lib/money";
 import { customerDisplayName, formatPhone } from "@/lib/phone";
 import { getServiceCatalog } from "@/lib/services";
@@ -39,15 +42,16 @@ export const metadata: Metadata = {
 };
 
 const adminTabs = [
-  { id: "add-barber", label: "Add barber", description: "Create team access" },
   { id: "barbers", label: "Manage barbers", description: "Profiles and access" },
+  { id: "add-barber", label: "Add barber", description: "Create team access" },
   { id: "services", label: "Services", description: "Menu and pricing" },
-  { id: "add-appointment", label: "Add appointment", description: "Create a booking" },
   { id: "appointments", label: "Appointments", description: "View and edit bookings" },
-  { id: "customers", label: "Customers", description: "Customer records and identity status" },
-  { id: "calls", label: "Booking calls", description: "Events and outcomes" },
+  { id: "add-appointment", label: "Add appointment", description: "Create a booking" },
   { id: "register", label: "Daily register", description: "Cash and commissions" },
+  { id: "customers", label: "Customers", description: "Customer records and identity status" },
   { id: "performance", label: "Performance", description: "Barber totals and visits" },  
+  { id: "calls", label: "Booking calls", description: "Events and outcomes" },
+  { id: "financials", label: "Financials", description: "Ledger and statements" },
 ] as const;
 type AdminTab = (typeof adminTabs)[number]["id"];
 
@@ -125,8 +129,17 @@ type FinancialAuditEventRecord = {
   changes?: Array<{ field?: string; before?: string; after?: string }>;
 };
 
+type ScheduleAvailabilityRecord = DailyHours & {
+  barberId: ObjectId;
+  dayOfWeek: number;
+};
+
 function isAdminTab(value?: string): value is AdminTab {
   return adminTabs.some((tab) => tab.id === value);
+}
+
+function financialView(value?: string): FinancialView {
+  return value === "profit-loss" || value === "balance-sheet" || value === "accounts" ? value : "ledger";
 }
 
 const callDateTimeFormatter = new Intl.DateTimeFormat("en-US", {
@@ -198,22 +211,29 @@ function safeCallUrl(value?: string) {
 export default async function AdminDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; tab?: string; customer?: string; call?: string; period?: string; date?: string; barber?: string; registerDate?: string; invite?: string; inviteBarber?: string }>;
+  searchParams: Promise<{ error?: string; tab?: string; customer?: string; call?: string; period?: string; date?: string; barber?: string; registerDate?: string; invite?: string; inviteBarber?: string; scheduleDate?: string; financialView?: string; financialStart?: string; financialEnd?: string; financialAsOf?: string; financialAccount?: string; financialNotice?: string }>;
 }) {
   const admin = await requireStaffRole("admin");
-  const { error, tab, customer: selectedCustomerId, call: selectedCallId, period, date, barber: performanceBarberId, registerDate, invite, inviteBarber } = await searchParams;
+  const { error, tab, customer: selectedCustomerId, call: selectedCallId, period, date, barber: performanceBarberId, registerDate, invite, inviteBarber, scheduleDate, financialView: requestedFinancialView, financialStart, financialEnd, financialAsOf, financialAccount } = await searchParams;
+  const activeTab: AdminTab = isAdminTab(tab) ? tab : "barbers";
   const staff = await getStaffCollection();
   const customersCollection = await getCustomerCollection();
   const client = await getMongoClient();
   const db = client.db("hqonmain");
   const serviceCatalog = await getServiceCatalog();
   const businessDate = currentShopDateTime().date;
+  const selectedFinancialView = financialView(requestedFinancialView);
+  const financialEndDate = normalizeScheduleDate(financialEnd, businessDate);
+  const requestedFinancialStart = normalizeScheduleDate(financialStart, `${businessDate.slice(0, 4)}-01-01`);
+  const financialStartDate = requestedFinancialStart <= financialEndDate ? requestedFinancialStart : financialEndDate;
+  const financialAsOfDate = normalizeScheduleDate(financialAsOf, financialEndDate);
+  const selectedScheduleDate = normalizeScheduleDate(scheduleDate, businessDate);
   const selectedRegisterDate = normalizeTotalsDate(registerDate, businessDate);
   const selectedRegisterRange = totalsRange("day", selectedRegisterDate);
   const selectedPerformancePeriod = normalizeTotalsPeriod(period);
   const selectedPerformanceDate = normalizeTotalsDate(date, businessDate);
   const selectedPerformanceRange = totalsRange(selectedPerformancePeriod, selectedPerformanceDate);
-  const [barbers, customers, appointments, appointmentCount, registerSales, registerPayouts, registerCloseout, registerAuditEvents, voiceCalls, voiceCallCount, voiceInProgressCount, voiceBookedAppointmentCount] = await Promise.all([
+  const [barbers, customers, appointments, appointmentCount, registerSales, registerPayouts, registerCloseout, registerAuditEvents, voiceCalls, voiceCallCount, voiceInProgressCount, voiceBookedAppointmentCount, scheduleAppointments, scheduleAvailability] = await Promise.all([
     staff.find({ role: "barber" }).sort({ active: -1, name: 1 }).toArray(),
     customersCollection.find({}).sort({ createdAt: -1 }).limit(250).toArray(),
     db.collection("appointments")
@@ -235,7 +255,13 @@ export default async function AdminDashboard({
     db.collection("voiceCalls").countDocuments(),
     db.collection("voiceCalls").countDocuments({ status: "in-progress" }),
     db.collection("appointments").countDocuments({ source: "voice" }),
+    db.collection("appointments").find({ requestedDate: selectedScheduleDate }).sort({ requestedTime: 1 }).toArray(),
+    db.collection<ScheduleAvailabilityRecord>("availability").find({ dayOfWeek: dayNumber(selectedScheduleDate) }).toArray(),
   ]);
+  const scheduleBarbers = barbers.filter((barber) => barber.active || scheduleAppointments.some((appointment) =>
+    appointment.barberId?.toString() === barber._id.toString() || appointment.barber === barber.name,
+  ));
+  const scheduleHours = new Map(scheduleAvailability.map((hours) => [hours.barberId.toString(), hours]));
   const selectedPerformanceBarber = performanceBarberId && ObjectId.isValid(performanceBarberId)
     ? barbers.find((barber) => barber._id.toString() === performanceBarberId) ?? null
     : null;
@@ -297,7 +323,15 @@ export default async function AdminDashboard({
     },
     { total: 0, completed: 0, noShow: 0, cancelled: 0 },
   );
-  const activeTab: AdminTab = isAdminTab(tab) ? tab : "barbers";
+  const financialDashboard = activeTab === "financials"
+    ? await getFinancialDashboard({
+        db,
+        start: financialStartDate,
+        end: financialEndDate,
+        asOf: financialAsOfDate,
+        cashAccountId: financialAccount,
+      })
+    : null;
   const performanceReport = buildBarberTotalsReport(
     performanceSales,
     performancePayouts,
@@ -414,7 +448,6 @@ export default async function AdminDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Add a barber</h2></div>
-                  <p>Create the staff profile, then privately share the one-time setup link.</p>
                 </div>
                 <form className="portal-form portal-form-grid" action={createBarber}>
                   <label>Full name<input name="name" required minLength={2} /></label>
@@ -438,7 +471,6 @@ export default async function AdminDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Manage barbers</h2></div>
-                  <p>Edit shop-controlled profile details, issue credential reset links, or deactivate access.</p>
                 </div>
                 <div className="staff-list">
                   {barbers.length === 0 && <p className="portal-empty">No barber accounts yet.</p>}
@@ -500,7 +532,6 @@ export default async function AdminDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Services</h2></div>
-                  <p>Edit the menu used by online booking, barbers, POS, and the voice assistant.</p>
                 </div>
                 <form className="admin-service-create" action={createService}>
                   <div className="admin-service-create-heading">
@@ -536,7 +567,6 @@ export default async function AdminDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Add appointment</h2></div>
-                  <p>Create a phone, walk-in, or staff-assisted booking.</p>
                 </div>
                 <form className="portal-form portal-form-grid" action={createAdminAppointment}>
                   <StaffCustomerFields />
@@ -585,14 +615,36 @@ export default async function AdminDashboard({
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>Appointments</h2></div>
-                  <p>View and update every shop appointment.</p>
                 </div>
+                <AppointmentSchedule
+                  date={selectedScheduleDate}
+                  today={businessDate}
+                  barbers={scheduleBarbers.map((barber) => ({ id: barber._id.toString(), name: barber.name }))}
+                  appointments={scheduleAppointments.map((appointment) => ({
+                    id: appointment._id.toString(),
+                    barberId: appointment.barberId?.toString(),
+                    barber: String(appointment.barber ?? ""),
+                    name: String(appointment.name ?? "Guest"),
+                    service: String(appointment.service ?? ""),
+                    time: String(appointment.requestedTime ?? ""),
+                    status: String(appointment.status ?? "pending"),
+                    visitType: String(appointment.visitType ?? "appointment"),
+                    href: `#appointment-${appointment._id.toString()}`,
+                  }))}
+                  hoursByBarber={Object.fromEntries(scheduleBarbers.map((barber) => [
+                    barber._id.toString(),
+                    scheduleHours.get(barber._id.toString()) ?? defaultHours(dayNumber(selectedScheduleDate)),
+                  ]))}
+                  basePath="/admin/dashboard"
+                  baseParams={{ tab: "appointments" }}
+                  emptyMessage="No shop appointments are scheduled for this day."
+                />
                 <div className="admin-appointment-list">
                   {appointments.length === 0 && <p className="portal-empty">No appointments yet.</p>}
                   {appointments.map((appointment) => {
                     const assignedBarberId = appointment.barberId?.toString() ?? "";
                     return (
-                      <form className="admin-appointment-card" action={updateAdminAppointment} key={appointment._id.toString()}>
+                      <form className="admin-appointment-card" id={`appointment-${appointment._id.toString()}`} action={updateAdminAppointment} key={appointment._id.toString()}>
                         <input type="hidden" name="appointmentId" value={appointment._id.toString()} />
                         <div className="admin-appointment-title">
                           <span>{String(appointment.name ?? "?").slice(0, 1)}</span>
@@ -701,7 +753,6 @@ export default async function AdminDashboard({
                   <>
                     <div className="portal-section-heading">
                       <div><h2>Customer records</h2></div>
-                      <p>Choose a customer to see identity status and appointment history.</p>
                     </div>
                     <div className="admin-customer-list">
                       {customers.length === 0 && <p className="portal-empty">No customer records yet.</p>}
@@ -837,7 +888,6 @@ export default async function AdminDashboard({
                   <>
                     <div className="portal-section-heading">
                       <div><h2>Booking calls</h2></div>
-                      <p>Review phone and website assistant activity.</p>
                     </div>
                     <div className="admin-call-overview">
                       <div><small>Total calls</small><strong>{voiceCallCount}</strong></div>
@@ -984,11 +1034,18 @@ export default async function AdminDashboard({
               </section>
             )}
 
+            {activeTab === "financials" && financialDashboard && (
+              <FinancialDashboardPanel
+                dashboard={financialDashboard}
+                view={selectedFinancialView}
+                dates={{ start: financialStartDate, end: financialEndDate, asOf: financialAsOfDate }}
+              />
+            )}
+
             {activeTab === "performance" && (
               <section className="portal-section">
                 <div className="portal-section-heading">
                   <div><h2>{selectedPerformanceBarber ? `${selectedPerformanceBarber.name}'s performance` : "Shop performance"}</h2></div>
-                  <p>Browse any barber or the whole shop by day, week, or month.</p>
                 </div>
                 <form className="admin-performance-scope" method="get" action="/admin/dashboard">
                   <input type="hidden" name="tab" value="performance" />

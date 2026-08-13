@@ -62,7 +62,17 @@ export async function POST(request: Request) {
     if (!signedInCustomer?.phoneVerifiedAt) {
       return Response.json({ message: "Verify your mobile number to reserve this appointment." }, { status: 401 });
     }
-    const name = signedInCustomer.name;
+    const requestedRecipientId = typeof body.recipientProfileId === "string" ? body.recipientProfileId.trim() : "";
+    const dependent = requestedRecipientId
+      ? (signedInCustomer.dependents ?? []).find((entry) => entry.id === requestedRecipientId && entry.active !== false)
+      : undefined;
+    if (requestedRecipientId && !dependent) {
+      return Response.json({ message: "That family profile is unavailable. Please choose who this appointment is for again." }, { status: 400 });
+    }
+    const name = dependent
+      ? [dependent.firstName, dependent.lastName].filter(Boolean).join(" ")
+      : signedInCustomer.name;
+    const recipientType = dependent ? "dependent" : "self";
     const email = signedInCustomer.email ?? "";
     const phone = signedInCustomer.phone;
 
@@ -72,7 +82,8 @@ export async function POST(request: Request) {
       phone,
       customerId: signedInCustomer._id,
       recipientName: name,
-      recipientType: "self",
+      recipientType,
+      ...(dependent ? { recipientProfileId: dependent.id } : {}),
       service: service.name,
       serviceId: service.id,
       price: service.price,
@@ -89,7 +100,15 @@ export async function POST(request: Request) {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    const savedAppointment = await createAppointment({ db, appointment, bookingSource: "online", customerId: signedInCustomer._id, recipientName: name });
+    const savedAppointment = await createAppointment({
+      db,
+      appointment,
+      bookingSource: "online",
+      customerId: signedInCustomer._id,
+      recipientName: name,
+      recipientType,
+      recipientProfileId: dependent?.id,
+    });
     const [sms, barberSms] = await Promise.all([
       sendAppointmentConfirmation(savedAppointment),
       sendBarberNewAppointment(savedAppointment),
@@ -105,6 +124,7 @@ export async function POST(request: Request) {
         barber: barber.name,
         date,
         time,
+        recipientName: name,
       },
     }, { status: 201 });
   } catch (error) {

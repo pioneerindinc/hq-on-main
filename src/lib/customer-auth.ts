@@ -9,6 +9,16 @@ import { getMongoClient } from "@/lib/mongodb";
 const CUSTOMER_COOKIE = "hq_customer_session";
 const SESSION_LENGTH_MS = 1000 * 60 * 60 * 24 * 180;
 
+export type CustomerDependent = {
+  id: string;
+  firstName: string;
+  lastName?: string;
+  relationship?: "child" | "dependent";
+  active: boolean;
+  createdAt: Date;
+  updatedAt?: Date;
+};
+
 export type CustomerRecord = {
   name: string;
   firstName?: string;
@@ -29,14 +39,7 @@ export type CustomerRecord = {
   mergedIntoCustomerId?: ObjectId;
   mergedAt?: Date;
   mergedByUserId?: ObjectId;
-  dependents?: Array<{
-    id: string;
-    firstName: string;
-    lastName?: string;
-    relationship?: string;
-    active: boolean;
-    createdAt: Date;
-  }>;
+  dependents?: CustomerDependent[];
   createdAt: Date;
   updatedAt: Date;
 };

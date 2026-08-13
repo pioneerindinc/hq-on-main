@@ -9,6 +9,12 @@ export type PhoneCustomer = {
   lastName: string;
   phone: string;
   email: string;
+  dependents: Array<{
+    id: string;
+    firstName: string;
+    lastName?: string;
+    relationship: "child" | "dependent";
+  }>;
 };
 
 export function PhoneAuthFlow({
