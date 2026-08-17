@@ -14,7 +14,7 @@ export type FinancialAccountRecord = {
   system?: boolean;
   parentAccountId?: ObjectId;
   vendorStaffId?: ObjectId;
-  taxFormType?: "1099-NEC";
+  taxFormType?: "1099";
   createdAt: Date;
   updatedAt: Date;
 };
@@ -104,7 +104,7 @@ export async function ensureBarberCommissionSubaccounts(db: Db) {
       $set: {
         name: barber.name,
         parentAccountId: parent._id,
-        taxFormType: "1099-NEC" as const,
+        taxFormType: "1099" as const,
         type: "expense" as const,
         active: true,
         updatedAt: now,
@@ -279,7 +279,7 @@ export async function getFinancialDashboard({
     if (id) ytdPayoutByBarber.set(id, (ytdPayoutByBarber.get(id) ?? 0) + Number(payout.paidAmountCents ?? 0));
   }
   const contractor1099 = accounts
-    .filter((account) => account.taxFormType === "1099-NEC" && account.vendorStaffId)
+    .filter((account) => account.taxFormType === "1099" && account.vendorStaffId)
     .map((account) => {
       const ledgerExpenseCents = periodBalances.get(account._id.toString()) ?? 0;
       const recordedPayoutCents = payoutByBarber.get(account.vendorStaffId!.toString()) ?? 0;

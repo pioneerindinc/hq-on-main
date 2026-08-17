@@ -20,7 +20,7 @@
         },
         "barberName": {
           "type": "string",
-          "description": "Optional preferred barber name as spoken by the caller, such as Brayden. Omit to check every active barber."
+          "description": "Optional preferred barber name or nickname exactly as spoken by the caller, such as Brayden, Abby, or Dale. The server resolves full names, first names, and configured nicknames to the same barber. Omit to check every active barber."
         }
       },
       "required": []
@@ -28,7 +28,7 @@
   },
   {
     "name": "list_barbers",
-    "description": "Silent internal validation that returns active barbers who offer the selected service. Use a serviceId returned by list_services. Do not announce or describe this lookup to the caller.",
+    "description": "Silent internal validation that returns active barbers who offer the selected service, including each barber's configured nickname and recognized aliases. Treat the name, first name, nickname, and aliases as the same barber. Use a serviceId returned by list_services. Do not announce or describe this lookup to the caller.",
     "parameters": {
       "type": "object",
       "properties": {

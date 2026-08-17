@@ -273,7 +273,7 @@ export function FinancialDashboardPanel({
             <div className="financial-contractor-table-wrap">
               <table>
                 <thead><tr><th>Barber</th><th>Ledger expense</th><th>POS cash paid</th><th>Difference</th></tr></thead>
-                <tbody>{dashboard.profitAndLoss.contractor1099.map((row) => <tr key={row.account._id.toString()}><td><strong>{row.account.name}</strong><small>{row.account.code} · 1099-NEC tracking</small></td><td>{formatMoney(row.ledgerExpenseCents)}</td><td>{formatMoney(row.recordedPayoutCents)}</td><td className={row.differenceCents === 0 ? "matched" : "different"}>{formatMoney(row.differenceCents)}</td></tr>)}</tbody>
+                <tbody>{dashboard.profitAndLoss.contractor1099.map((row) => <tr key={row.account._id.toString()}><td><strong>{row.account.name}</strong><small>{row.account.code} · 1099 tracking</small></td><td>{formatMoney(row.ledgerExpenseCents)}</td><td>{formatMoney(row.recordedPayoutCents)}</td><td className={row.differenceCents === 0 ? "matched" : "different"}>{formatMoney(row.differenceCents)}</td></tr>)}</tbody>
               </table>
             </div>
             <small className="financial-tax-note">Tracking aid only. Confirm contractor classification and final reportable amounts with your tax professional before filing.</small>

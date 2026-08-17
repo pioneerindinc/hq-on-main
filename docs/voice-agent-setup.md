@@ -112,7 +112,8 @@ Use Vapi's tool test or a local tunnel and confirm:
    only the named preferred barber, and defaults to the shop's current local
    date when no date is supplied.
 3. `list_barbers` excludes inactive barbers and those who do not offer the
-   selected service.
+   selected service, and returns configured nicknames as aliases for the same
+   barber ID.
 4. `list_available_slots` matches the web booking calendar and excludes booked
    times.
 5. `book_appointment` creates one confirmed `appointments` record with

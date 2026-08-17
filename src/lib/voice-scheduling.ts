@@ -257,17 +257,13 @@ async function listShopOpenings(input: { date: string; barberName?: string }) {
     .find({ role: "barber", active: true })
     .sort({ name: 1 })
     .toArray();
-  const requestedName = input.barberName?.trim().toLocaleLowerCase() ?? "";
+  const requestedName = normalizeBarberName(input.barberName);
   const barbers = requestedName
-    ? activeBarbers.filter((barber) => {
-        const name = stringValue(barber.name).toLocaleLowerCase();
-        const firstName = name.split(/\s+/)[0];
-        return name === requestedName || firstName === requestedName || name.includes(requestedName);
-      })
+    ? matchingBarbers(activeBarbers, requestedName)
     : activeBarbers;
 
   if (requestedName && barbers.length === 0) {
-    const names = activeBarbers.map((barber) => stringValue(barber.name)).filter(Boolean);
+    const names = activeBarbers.map(barberNameWithNickname).filter(Boolean);
     throw new VoiceToolError(
       `No active barber matched ${input.barberName}. The active barbers are: ${names.join(", ") || "none"}.`,
     );
@@ -279,6 +275,8 @@ async function listShopOpenings(input: { date: string; barberName?: string }) {
       return {
         barberId: barber._id.toString(),
         barber: barber.name,
+        nickname: barber.nickname || null,
+        aliases: barberAliases(barber),
         availabilityStatus: details.status,
         slots: details.slots.map((value) => ({ value, spoken: displayTime(value) })),
       };
@@ -335,9 +333,47 @@ async function listBarbers(serviceId: string) {
     barbers: barbers.map((barber) => ({
       id: barber._id.toString(),
       name: barber.name,
+      nickname: barber.nickname || null,
+      aliases: barberAliases(barber),
       specialty: barber.specialty ?? "HQ Barber",
     })),
   };
+}
+
+function normalizeBarberName(value?: string) {
+  return stringValue(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function barberAliases(barber: { name: string; nickname?: string }) {
+  const name = stringValue(barber.name).trim();
+  const firstName = name.split(/\s+/)[0] ?? "";
+  return [...new Set([name, firstName, stringValue(barber.nickname).trim()].filter(Boolean))];
+}
+
+function barberNameWithNickname(barber: { name: string; nickname?: string }) {
+  const name = stringValue(barber.name).trim();
+  const nickname = stringValue(barber.nickname).trim();
+  return nickname ? `${name} (${nickname})` : name;
+}
+
+function matchingBarbers<T extends { name: string; nickname?: string }>(barbers: T[], requestedName: string) {
+  const exactMatches = barbers.filter((barber) =>
+    barberAliases(barber).some((alias) => normalizeBarberName(alias) === requestedName),
+  );
+  if (exactMatches.length) return exactMatches;
+
+  return barbers.filter((barber) =>
+    barberAliases(barber).some((alias) => {
+      const normalizedAlias = normalizeBarberName(alias);
+      return requestedName.length >= 2 && normalizedAlias.includes(requestedName);
+    }),
+  );
 }
 
 async function listAvailableSlots(input: {
