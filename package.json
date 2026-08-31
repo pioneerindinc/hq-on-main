@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test:finance-snapshot": "node --test --test-isolation=none --experimental-strip-types tests/finance-snapshot.test.mjs",
     "test:phone-identity": "node --test --test-isolation=none tests/phone-identity.test.mjs",
     "migrate:customer-phone": "node --env-file=.env.local scripts/migrate-customer-phone-identity.mjs"
   },

@@ -15,7 +15,6 @@ import { AdminServiceDeleteButton } from "@/components/admin-service-delete-butt
 import { AppointmentSchedule, normalizeScheduleDate } from "@/components/appointment-schedule";
 import { BarberTotalsReport } from "@/components/barber-totals-report";
 import { BarberSetupLink } from "@/components/barber-setup-link";
-import { FinancialDashboardPanel, type FinancialView } from "@/components/financial-dashboard";
 import { StaffHeader } from "@/components/staff-header";
 import { StaffCustomerFields } from "@/components/staff-customer-fields";
 import { getStaffCollection, requireStaffRole } from "@/lib/auth";
@@ -31,7 +30,6 @@ import { currentShopDateTime, dayNumber, defaultHours, displayTime, formatDispla
 import { barberPhotoUrl } from "@/lib/barber-profile";
 import { getCustomerCollection } from "@/lib/customer-auth";
 import { getMongoClient } from "@/lib/mongodb";
-import { getFinancialDashboard } from "@/lib/financial-ledger";
 import { formatMoney, formatWholeDollarMoney, roundCashPayoutCents } from "@/lib/money";
 import { customerDisplayName, formatPhone } from "@/lib/phone";
 import { getServiceCatalog } from "@/lib/services";
@@ -51,7 +49,6 @@ const adminTabs = [
   { id: "customers", label: "Customers", description: "Customer records and identity status" },
   { id: "performance", label: "Performance", description: "Barber totals and visits" },  
   { id: "calls", label: "Booking calls", description: "Events and outcomes" },
-  { id: "financials", label: "Financials", description: "Ledger and statements" },
 ] as const;
 type AdminTab = (typeof adminTabs)[number]["id"];
 
@@ -138,10 +135,6 @@ function isAdminTab(value?: string): value is AdminTab {
   return adminTabs.some((tab) => tab.id === value);
 }
 
-function financialView(value?: string): FinancialView {
-  return value === "profit-loss" || value === "balance-sheet" || value === "opening-balances" || value === "import-ytd" || value === "accounts" ? value : "ledger";
-}
-
 const callDateTimeFormatter = new Intl.DateTimeFormat("en-US", {
   timeZone: process.env.BARBERSHOP_TIME_ZONE || "America/Indiana/Indianapolis",
   month: "2-digit",
@@ -211,10 +204,10 @@ function safeCallUrl(value?: string) {
 export default async function AdminDashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; tab?: string; customer?: string; call?: string; period?: string; date?: string; barber?: string; registerDate?: string; invite?: string; inviteBarber?: string; scheduleDate?: string; financialView?: string; financialStart?: string; financialEnd?: string; financialAsOf?: string; financialAccount?: string; financialNotice?: string }>;
+  searchParams: Promise<{ error?: string; tab?: string; customer?: string; call?: string; period?: string; date?: string; barber?: string; registerDate?: string; invite?: string; inviteBarber?: string; scheduleDate?: string }>;
 }) {
   const admin = await requireStaffRole("admin");
-  const { error, tab, customer: selectedCustomerId, call: selectedCallId, period, date, barber: performanceBarberId, registerDate, invite, inviteBarber, scheduleDate, financialView: requestedFinancialView, financialStart, financialEnd, financialAsOf, financialAccount, financialNotice } = await searchParams;
+  const { error, tab, customer: selectedCustomerId, call: selectedCallId, period, date, barber: performanceBarberId, registerDate, invite, inviteBarber, scheduleDate } = await searchParams;
   const activeTab: AdminTab = isAdminTab(tab) ? tab : "barbers";
   const staff = await getStaffCollection();
   const customersCollection = await getCustomerCollection();
@@ -222,11 +215,6 @@ export default async function AdminDashboard({
   const db = client.db("hqonmain");
   const serviceCatalog = await getServiceCatalog();
   const businessDate = currentShopDateTime().date;
-  const selectedFinancialView = financialView(requestedFinancialView);
-  const financialEndDate = normalizeScheduleDate(financialEnd, businessDate);
-  const requestedFinancialStart = normalizeScheduleDate(financialStart, `${businessDate.slice(0, 4)}-01-01`);
-  const financialStartDate = requestedFinancialStart <= financialEndDate ? requestedFinancialStart : financialEndDate;
-  const financialAsOfDate = normalizeScheduleDate(financialAsOf, financialEndDate);
   const selectedScheduleDate = normalizeScheduleDate(scheduleDate, businessDate);
   const selectedRegisterDate = normalizeTotalsDate(registerDate, businessDate);
   const selectedRegisterRange = totalsRange("day", selectedRegisterDate);
@@ -323,15 +311,6 @@ export default async function AdminDashboard({
     },
     { total: 0, completed: 0, noShow: 0, cancelled: 0 },
   );
-  const financialDashboard = activeTab === "financials"
-    ? await getFinancialDashboard({
-        db,
-        start: financialStartDate,
-        end: financialEndDate,
-        asOf: financialAsOfDate,
-        cashAccountId: financialAccount,
-      })
-    : null;
   const performanceReport = buildBarberTotalsReport(
     performanceSales,
     performancePayouts,
@@ -1032,15 +1011,6 @@ export default async function AdminDashboard({
                   ))}
                 </div>
               </section>
-            )}
-
-            {activeTab === "financials" && financialDashboard && (
-              <FinancialDashboardPanel
-                dashboard={financialDashboard}
-                view={selectedFinancialView}
-                dates={{ start: financialStartDate, end: financialEndDate, asOf: financialAsOfDate }}
-                notice={financialNotice}
-              />
             )}
 
             {activeTab === "performance" && (
