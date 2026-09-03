@@ -47,6 +47,11 @@ test("returns only completed cash sales, paid payouts, and closed closeouts", ()
   assert.deepEqual(snapshot.sales.map(({ id }) => id), [includedSaleId.toString()]);
   assert.deepEqual(snapshot.payouts.map(({ id }) => id), [includedPayoutId.toString()]);
   assert.deepEqual(snapshot.closeouts.map(({ id }) => id), [includedCloseoutId.toString()]);
+  const { businessDate, hqRetainedCents, varianceCents, status } = snapshot.closeouts[0];
+  assert.deepEqual(
+    { businessDate, hqRetainedCents, varianceCents, status },
+    { businessDate: "2026-08-31", hqRetainedCents: 14000, varianceCents: 0, status: "closed" },
+  );
 });
 
 test("uses stable source IDs and updated timestamps as advancing revisions", () => {
@@ -123,6 +128,22 @@ test("preserves signed integer drawer variances", () => {
   assert.equal(snapshot.closeouts[0].varianceCents, -125);
 });
 
+test("rejects closeouts with missing or invalid retained cash cents", () => {
+  const snapshot = buildFinanceSnapshot({
+    generatedAt: now,
+    contractors: [],
+    sales: [],
+    payouts: [],
+    closeouts: [
+      closeout({ hqRetainedCents: undefined }),
+      closeout({ hqRetainedCents: 14000.5 }),
+      closeout({ hqRetainedCents: -100 }),
+    ],
+  });
+
+  assert.deepEqual(snapshot.closeouts, []);
+});
+
 function sale(overrides = {}) {
   return {
     _id: new ObjectId(),
@@ -154,6 +175,7 @@ function closeout(overrides = {}) {
   return {
     _id: new ObjectId(),
     businessDate: "2026-08-31",
+    hqRetainedCents: 14000,
     varianceCents: 0,
     status: "closed",
     updatedAt: now,

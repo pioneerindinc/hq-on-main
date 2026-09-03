@@ -45,6 +45,7 @@ export type FinanceSnapshot = {
     id: string;
     revision: string;
     businessDate: string;
+    hqRetainedCents: number;
     varianceCents: number;
     status: "closed";
     updatedAt: string;
@@ -137,9 +138,10 @@ export function buildFinanceSnapshot({
       const id = stableId(record._id);
       const updatedAt = isoTimestamp(record.updatedAt);
       const businessDate = dateOnly(record.businessDate);
+      const hqRetainedCents = integerCents(record.hqRetainedCents, true);
       const varianceCents = signedIntegerCents(record.varianceCents);
-      if (record.status !== "closed" || !id || !updatedAt || !businessDate || varianceCents === null) return [];
-      return [{ id, revision: updatedAt, businessDate, varianceCents, status: "closed" as const, updatedAt }];
+      if (record.status !== "closed" || !id || !updatedAt || !businessDate || hqRetainedCents === null || varianceCents === null) return [];
+      return [{ id, revision: updatedAt, businessDate, hqRetainedCents, varianceCents, status: "closed" as const, updatedAt }];
     }).sort(byId),
   };
 }

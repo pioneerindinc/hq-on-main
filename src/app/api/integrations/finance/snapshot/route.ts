@@ -55,7 +55,7 @@ export async function GET(request: Request) {
     ).toArray(),
     db.collection("drawerCloseouts").find(
       { status: "closed" },
-      { projection: { businessDate: 1, varianceCents: 1, status: 1, updatedAt: 1 } },
+      { projection: { businessDate: 1, hqRetainedCents: 1, varianceCents: 1, status: 1, updatedAt: 1 } },
     ).toArray(),
   ]);
 
